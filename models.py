@@ -1,0 +1,134 @@
+"""Graph Convolutional Network (GCN) building blocks for node-, edge- and
+graph-level tasks, built on PyTorch Geometric.
+
+All three task models share one `GCNEncoder`; each task adds its own head.
+"""
+from typing import Optional
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.nn import GCNConv, global_add_pool, global_max_pool, global_mean_pool
+
+
+class GCNEncoder(nn.Module):
+    """Stack of GCNConv layers producing node embeddings.
+
+    Args:
+        in_channels: input feature dimension.
+        hidden_channels: width of intermediate layers.
+        out_channels: dimension of the returned node embeddings.
+        num_layers: number of GCNConv layers (>= 1).
+        dropout: dropout probability applied between layers.
+        batch_norm: add BatchNorm after each hidden layer.
+        final_activation: apply ReLU (+norm/dropout) after the last layer too.
+            Use False when the output feeds a linear head or is a logit.
+    """
+
+    def __init__(self, in_channels: int, hidden_channels: int, out_channels: int,
+                 num_layers: int = 2, dropout: float = 0.5,
+                 batch_norm: bool = False, final_activation: bool = False):
+        super().__init__()
+        assert num_layers >= 1
+        dims = [in_channels] + [hidden_channels] * (num_layers - 1) + [out_channels]
+        self.convs = nn.ModuleList(GCNConv(dims[i], dims[i + 1]) for i in range(num_layers))
+        self.norms = nn.ModuleList(
+            nn.BatchNorm1d(dims[i + 1]) if batch_norm else nn.Identity()
+            for i in range(num_layers)
+        )
+        self.dropout = dropout
+        self.final_activation = final_activation
+
+    def forward(self, x, edge_index, edge_weight: Optional[torch.Tensor] = None):
+        last = len(self.convs) - 1
+        for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
+            x = conv(x, edge_index, edge_weight)
+            if i < last or self.final_activation:
+                x = norm(x)
+                x = F.relu(x)
+                x = F.dropout(x, p=self.dropout, training=self.training)
+        return x
+
+
+# --------------------------------------------------------------------------
+# 1. Node-level: classification (out_channels = #classes) or regression
+#    (out_channels = #targets). Output is one row per node.
+# --------------------------------------------------------------------------
+class NodeGCN(nn.Module):
+    def __init__(self, in_channels, hidden_channels, out_channels,
+                 num_layers=2, dropout=0.5, batch_norm=False):
+        super().__init__()
+        self.encoder = GCNEncoder(in_channels, hidden_channels, out_channels,
+                                  num_layers, dropout, batch_norm,
+                                  final_activation=False)
+
+    def forward(self, x, edge_index, edge_weight=None):
+        return self.encoder(x, edge_index, edge_weight)
+
+
+# --------------------------------------------------------------------------
+# 2. Edge-level: link prediction and edge classification.
+#    Encode nodes with the GCN, then score/classify node pairs.
+# --------------------------------------------------------------------------
+class EdgeGCN(nn.Module):
+    """
+    encode(...)        -> node embeddings z
+    decode_link(...)   -> dot-product logit per node pair (link prediction)
+    classify_edges(...) -> class logits per edge (edge classification);
+                           only available when `num_edge_classes` is given.
+    """
+
+    def __init__(self, in_channels, hidden_channels, embed_channels,
+                 num_layers=2, dropout=0.5, num_edge_classes: Optional[int] = None):
+        super().__init__()
+        self.encoder = GCNEncoder(in_channels, hidden_channels, embed_channels,
+                                  num_layers, dropout, final_activation=False)
+        self.edge_head = None
+        if num_edge_classes is not None:
+            self.edge_head = nn.Sequential(
+                nn.Linear(3 * embed_channels, hidden_channels),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_channels, num_edge_classes),
+            )
+
+    def encode(self, x, edge_index, edge_weight=None):
+        return self.encoder(x, edge_index, edge_weight)
+
+    @staticmethod
+    def decode_link(z, edge_label_index):
+        src, dst = edge_label_index
+        return (z[src] * z[dst]).sum(dim=-1)
+
+    def classify_edges(self, z, edge_label_index):
+        assert self.edge_head is not None, "construct with num_edge_classes=..."
+        src, dst = edge_label_index
+        # Symmetric in (src, dst) so undirected edges get one prediction.
+        feats = torch.cat([z[src] + z[dst], (z[src] - z[dst]).abs(), z[src] * z[dst]], dim=-1)
+        return self.edge_head(feats)
+
+
+# --------------------------------------------------------------------------
+# 3. Graph-level: classification or regression. One output row per graph.
+# --------------------------------------------------------------------------
+_POOL = {"mean": global_mean_pool, "sum": global_add_pool, "max": global_max_pool}
+
+
+class GraphGCN(nn.Module):
+    def __init__(self, in_channels, hidden_channels, out_channels,
+                 num_layers=3, dropout=0.5, pooling="mean", batch_norm=True):
+        super().__init__()
+        self.encoder = GCNEncoder(in_channels, hidden_channels, hidden_channels,
+                                  num_layers, dropout, batch_norm,
+                                  final_activation=True)
+        self.pool = _POOL[pooling]
+        self.head = nn.Sequential(
+            nn.Linear(hidden_channels, hidden_channels),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_channels, out_channels),
+        )
+
+    def forward(self, x, edge_index, batch, edge_weight=None):
+        h = self.encoder(x, edge_index, edge_weight)
+        return self.head(self.pool(h, batch))

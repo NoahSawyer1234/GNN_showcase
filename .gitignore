@@ -1,0 +1,9 @@
+# datasets and processed outputs
+data/
+*.npy
+*.pt
+
+# python
+__pycache__/
+*.pyc
+.venv/
