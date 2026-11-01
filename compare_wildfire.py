@@ -31,7 +31,7 @@ import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 
 from compare_utils import (DEVICE, Results, Timer, add_model_args, balanced_class_weight,
-                           constant_predictor, count_params, fit_gbm, fit_mlp, fit_torch,
+                           constant_predictor, count_params, fit_gbm, fit_mlp, fit_torch, note_loss,
                            neighbor_mean_features, score, selection_score, set_seed, to_scores)
 from models import GraphGCN, NodeGCN
 from preprocess_wildfire import WildfireGridDataset
@@ -64,6 +64,7 @@ def gcn_pixel(args, dtr, dva, dte, w, seed):
             loss = F.cross_entropy(model(b.x, b.edge_index), b.y, weight=wt, ignore_index=-1)
             opt.zero_grad()
             loss.backward()
+            note_loss(loss)
             opt.step()
 
     @torch.no_grad()
@@ -76,8 +77,7 @@ def gcn_pixel(args, dtr, dva, dte, w, seed):
             ys.append(b.y[valid])
         return torch.cat(ys).cpu().numpy(), torch.cat(ps).cpu().numpy()
 
-    fit_torch(model, train_epoch, lambda: selection_score("binary", *collect(dva)), args.epochs,
-              args.patience, args.lr, args.wd)
+    fit_torch(model, train_epoch, lambda: selection_score("binary", *collect(dva)), args)
     (yv, pv), (yt, pt) = collect(dva), collect(dte)
     m = score("binary", yv, pv, yt, pt)
     return m, count_params(model)
@@ -141,6 +141,7 @@ def gcn_patch(args, dtr, dva, dte, seed):
             loss = F.mse_loss(model(b.x, b.edge_index, b.batch).squeeze(-1), b.y_graph)
             opt.zero_grad()
             loss.backward()
+            note_loss(loss)
             opt.step()
 
     @torch.no_grad()
@@ -152,8 +153,7 @@ def gcn_patch(args, dtr, dva, dte, seed):
             ys.append(b.y_graph)
         return torch.cat(ys).cpu().numpy(), torch.cat(ps).cpu().numpy()
 
-    fit_torch(model, train_epoch, lambda: selection_score("regression", *collect(dva)), args.epochs,
-              args.patience, args.lr, args.wd)
+    fit_torch(model, train_epoch, lambda: selection_score("regression", *collect(dva)), args)
     (yv, pv), (yt, pt) = collect(dva), collect(dte)
     return score("regression", yv, pv, yt, pt), count_params(model)
 
@@ -192,7 +192,7 @@ def main():
     p.add_argument("--max-class-weight", type=float, default=20.0, help="cap on fire/no-fire weight ratio")
     p.add_argument("--pooling", choices=["mean", "sum", "max"], default="mean", help="patch-level GCN readout")
     add_model_args(p)
-    p.set_defaults(epochs=30, patience=5, lr=0.005, wd=1e-5, dropout=0.2, gbm_trees=300, mlp_batch=4096, seeds=1)
+    p.set_defaults(epochs=200, patience=15, loss_patience=40, lr=0.005, wd=1e-5, dropout=0.2, gbm_trees=300, mlp_batch=4096, seeds=1)
     args = p.parse_args()
     args.out = args.out or f"results/wildfire_{args.task}.json"
 

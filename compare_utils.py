@@ -150,27 +150,67 @@ def count_params(model) -> int:
     return sum(p.numel() for p in model.parameters())
 
 
-def fit_torch(model, train_epoch, val_score, epochs, patience, lr, weight_decay):
-    """Generic early-stopped training loop. `train_epoch(opt)` runs one epoch; `val_score()` returns a
-    float (higher is better). The best-validation weights are restored before returning."""
+LAST_FIT = None          # diagnostics of the most recent fit_torch call (picked up by Results.add)
+_EPOCH_LOSSES = []
+
+
+def note_loss(loss):
+    """Called by every train_epoch after each backward(): collects the training loss for the plateau rule."""
+    _EPOCH_LOSSES.append(float(loss.detach()))
+
+
+def fit_torch(model, train_epoch, val_score, args):
+    """Early-stopped training loop shared by every GCN and MLP (so both get the identical rule).
+
+    One epoch = `train_epoch(opt)`; `val_score()` returns a float, higher is better. Training stops at the
+    FIRST of:
+      1. validation score has not improved by > --min-delta for --patience epochs   (the main rule)
+      2. mean training loss has not improved by > 0.1% (relative) for --loss-patience epochs
+      3. --epochs (a safety cap only; the run is flagged 'hit cap' if it gets there)
+    The learning rate is halved (--lr-decay) after --patience/3 epochs without validation improvement, which
+    lets a model keep improving with finer steps before rule 1 fires. The best-validation weights are
+    restored before returning, and the diagnostics are stored in LAST_FIT.
+    """
+    global LAST_FIT
     model.to(DEVICE)
-    opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    best, best_state, bad = -np.inf, None, 0
-    for _ in range(epochs):
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
+    sched = None
+    if args.lr_decay < 1.0:
+        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="max", factor=args.lr_decay,
+                                                           patience=max(1, args.patience // 3), min_lr=args.lr * 1e-3)
+    best, best_epoch, best_state, bad = -np.inf, 0, None, 0
+    best_loss, loss_bad, reason, epoch = np.inf, 0, "hit cap", 0
+    for epoch in range(1, args.epochs + 1):
         model.train()
+        _EPOCH_LOSSES.clear()
         train_epoch(opt)
+        tl = float(np.mean(_EPOCH_LOSSES)) if _EPOCH_LOSSES else np.nan
         model.eval()
         with torch.no_grad():
             s = val_score()
-        if np.isfinite(s) and s > best:
-            best, best_state, bad = s, {k: v.detach().clone() for k, v in model.state_dict().items()}, 0
+        if sched is not None and np.isfinite(s):
+            sched.step(s)
+        if np.isfinite(s) and s > best + args.min_delta:
+            best, best_epoch, bad = s, epoch, 0
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
         else:
             bad += 1
-            if bad >= patience:
+            if bad >= args.patience:
+                reason = "val patience"
                 break
+        if np.isfinite(tl):
+            if tl < best_loss * (1 - 1e-3):
+                best_loss, loss_bad = tl, 0
+            else:
+                loss_bad += 1
+                if args.loss_patience > 0 and loss_bad >= args.loss_patience:
+                    reason = "train-loss plateau"
+                    break
     if best_state is not None:
         model.load_state_dict(best_state)
     model.eval()
+    LAST_FIT = {"epochs": epoch, "best_epoch": best_epoch, "stopped_by": reason,
+                "final_lr": float(opt.param_groups[0]["lr"]), "best_val": float(best)}
     return best
 
 
@@ -202,10 +242,11 @@ def fit_mlp(Xtr, ytr, Xva, yva, kind, num_classes, args, class_weight=None, seed
             loss = F.cross_entropy(out, yb, weight=w) if cls else F.mse_loss(out.squeeze(-1), yb)
             opt.zero_grad()
             loss.backward()
+            note_loss(loss)
             opt.step()
 
     fit_torch(model, train_epoch, lambda: selection_score(kind, yva, to_scores(kind, predict(Xva))),
-              args.epochs, args.patience, args.lr, args.wd)
+              args)
     return predict, count_params(model)
 
 
@@ -288,9 +329,18 @@ class Results:
         self.title, self.rows = title, {}
 
     def add(self, model, metrics, params=None, seconds=None):
+        global LAST_FIT
         r = self.rows.setdefault(model, {"params": params, "runs": []})
         r["runs"].append({**metrics, "seconds": seconds})
-        print(f"  [{model}] finished" + (f" in {seconds:.1f}s" if seconds else ""), flush=True)
+        note = ""
+        if LAST_FIT is not None:                       # a torch model (GCN / MLP) was just trained
+            r.setdefault("fit", []).append(LAST_FIT)
+            note = (f"; {LAST_FIT['epochs']} epochs, best at {LAST_FIT['best_epoch']}, "
+                    f"stopped by {LAST_FIT['stopped_by']}")
+            if LAST_FIT["stopped_by"] == "hit cap":
+                note += "  ** still improving at the cap: raise --epochs **"
+            LAST_FIT = None
+        print(f"  [{model}] finished" + (f" in {seconds:.1f}s" if seconds else "") + note, flush=True)
 
     def summary(self):
         out = {}
@@ -343,8 +393,13 @@ def add_model_args(p):
     g.add_argument("--dropout", type=float, default=0.5)
     g.add_argument("--lr", type=float, default=0.01)
     g.add_argument("--wd", type=float, default=5e-4)
-    g.add_argument("--epochs", type=int, default=200)
-    g.add_argument("--patience", type=int, default=30)
+    g.add_argument("--epochs", type=int, default=1000, help="safety cap only; early stopping normally ends training")
+    g.add_argument("--patience", type=int, default=50, help="stop after this many epochs without validation improvement")
+    g.add_argument("--min-delta", type=float, default=1e-4, help="smallest validation improvement that counts")
+    g.add_argument("--loss-patience", type=int, default=100,
+                   help="also stop if mean training loss has not improved for this many epochs (0 = off)")
+    g.add_argument("--lr-decay", type=float, default=0.5,
+                   help="halve the LR after patience/3 epochs without validation improvement (1.0 = off)")
     g.add_argument("--mlp-batch", type=int, default=2048)
     g.add_argument("--seeds", type=int, default=3, help="repeat everything with seeds 0..N-1")
     g.add_argument("--gbm-backend", choices=["auto", "lightgbm", "sklearn"], default="auto",

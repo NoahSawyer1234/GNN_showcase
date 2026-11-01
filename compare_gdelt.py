@@ -33,7 +33,7 @@ import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 
 from compare_utils import (DEVICE, Results, Timer, add_model_args, balanced_class_weight,
-                           constant_predictor, count_params, fit_gbm, fit_mlp, fit_torch,
+                           constant_predictor, count_params, fit_gbm, fit_mlp, fit_torch, note_loss,
                            neighbor_mean_features, score, selection_score, set_seed, to_scores)
 from graph_utils import load_processed
 from models import EdgeGCN, GraphGCN, NodeGCN
@@ -155,6 +155,7 @@ def gcn_node(args, tr, va, te, task, ridx, w, C, seed):
             loss = F.cross_entropy(out, y, weight=wt) if cls else F.mse_loss(out.squeeze(-1), y)
             opt.zero_grad()
             loss.backward()
+            note_loss(loss)
             opt.step()
 
     @torch.no_grad()
@@ -166,8 +167,7 @@ def gcn_node(args, tr, va, te, task, ridx, w, C, seed):
             ys.append(y)
         return torch.cat(ys).cpu().numpy(), torch.cat(ps).cpu().numpy()
 
-    fit_torch(model, train_epoch, lambda: selection_score(kind, *collect(lva)), args.epochs,
-              args.patience, args.lr, args.wd)
+    fit_torch(model, train_epoch, lambda: selection_score(kind, *collect(lva)), args)
     (yv, pv), (yt, pt) = collect(lva), collect(lte)
     return score(kind, yv, pv, yt, pt), count_params(model)
 
@@ -190,6 +190,7 @@ def gcn_link(args, tr, va, te, seed):
                                                       torch.cat([torch.ones_like(pos), torch.zeros_like(neg)]))
             opt.zero_grad()
             loss.backward()
+            note_loss(loss)
             opt.step()
 
     @torch.no_grad()
@@ -203,8 +204,7 @@ def gcn_link(args, tr, va, te, seed):
             nw += [b.edge_label_is_new.cpu(), ~b.neg_in_lookback.cpu()]
         return (torch.cat(ys).numpy(), torch.cat(ss).cpu().numpy(), torch.cat(nw).numpy())
 
-    fit_torch(model, train_epoch, lambda: selection_score("ranking", *collect(lva)[:2]), args.epochs,
-              args.patience, args.lr, args.wd)
+    fit_torch(model, train_epoch, lambda: selection_score("ranking", *collect(lva)[:2]), args)
     (yv, sv, _), (yt, st, nt) = collect(lva), collect(lte)
     return score("ranking", yv, sv, yt, st, test_subset=nt), count_params(model)
 
@@ -226,6 +226,7 @@ def gcn_edge_class(args, tr, va, te, w, C, seed):
             loss = F.cross_entropy(logits(b), b.edge_label_class, weight=wt)
             opt.zero_grad()
             loss.backward()
+            note_loss(loss)
             opt.step()
 
     @torch.no_grad()
@@ -237,8 +238,7 @@ def gcn_edge_class(args, tr, va, te, w, C, seed):
             ys.append(b.edge_label_class)
         return torch.cat(ys).cpu().numpy(), torch.cat(ps).cpu().numpy()
 
-    fit_torch(model, train_epoch, lambda: selection_score("multiclass", *collect(lva)), args.epochs,
-              args.patience, args.lr, args.wd)
+    fit_torch(model, train_epoch, lambda: selection_score("multiclass", *collect(lva)), args)
     (yv, pv), (yt, pt) = collect(lva), collect(lte)
     return score("multiclass", yv, pv, yt, pt), count_params(model)
 
@@ -261,6 +261,7 @@ def gcn_graph(args, tr, va, te, task, gidx, w, seed):
             loss = F.cross_entropy(out, y, weight=wt) if cls else F.mse_loss(out.squeeze(-1), y)
             opt.zero_grad()
             loss.backward()
+            note_loss(loss)
             opt.step()
 
     @torch.no_grad()
@@ -272,8 +273,7 @@ def gcn_graph(args, tr, va, te, task, gidx, w, seed):
             ys.append(y)
         return torch.cat(ys).cpu().numpy(), torch.cat(ps).cpu().numpy()
 
-    fit_torch(model, train_epoch, lambda: selection_score(kind, *collect(lva)), args.epochs,
-              args.patience, args.lr, args.wd)
+    fit_torch(model, train_epoch, lambda: selection_score(kind, *collect(lva)), args)
     (yv, pv), (yt, pt) = collect(lva), collect(lte)
     return score(kind, yv, pv, yt, pt), count_params(model)
 

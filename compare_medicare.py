@@ -19,7 +19,7 @@ import torch
 import torch.nn.functional as F
 
 from compare_utils import (DEVICE, Results, Timer, add_model_args, balanced_class_weight,
-                           constant_predictor, count_params, fit_gbm, fit_mlp, fit_torch,
+                           constant_predictor, count_params, fit_gbm, fit_mlp, fit_torch, note_loss,
                            neighbor_mean_features, score, selection_score, set_seed, to_scores)
 from graph_utils import load_processed
 from models import NodeGCN
@@ -41,11 +41,13 @@ def run_gcn(args, data, w, seed):
 
     def train_epoch(opt):
         opt.zero_grad()
-        F.cross_entropy(forward()[d.train_mask], d.y[d.train_mask], weight=wt).backward()
+        loss = F.cross_entropy(forward()[d.train_mask], d.y[d.train_mask], weight=wt)
+        loss.backward()
+        note_loss(loss)
         opt.step()
 
     fit_torch(model, train_epoch, lambda: selection_score("binary", y[va], probs()[va]),
-              args.epochs, args.patience, args.lr, args.wd)
+              args)
     with torch.no_grad():
         p = probs()
     return score("binary", y[va], p[va], y[te], p[te]), count_params(model)
