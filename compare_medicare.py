@@ -1,12 +1,16 @@
-"""GCN vs MLP vs GBM on Medicare provider fraud (node classification).
+"""GCN vs GBM on Medicare provider fraud (node classification).
 
   python preprocess_medicare.py --raw-dir data/raw/medicare --out data/processed/medicare.pt
   python compare_medicare.py --data data/processed/medicare.pt --seeds 5 --neighbor-baselines
 
-All three models see the same provider features and the same train/val/test providers. Only the
-GCN also sees the provider-provider graph (shared patients / physicians). With --neighbor-baselines
-the MLP and GBM additionally get [x, mean of neighbours' x], i.e. hand-engineered graph features,
+Every model sees the same provider features and the same train/val/test providers. Only the graph
+models also see the provider-provider graph (shared patients / physicians). With --neighbor-baselines
+the GBM additionally gets [x, mean of neighbours' x], i.e. hand-engineered graph features,
 which separates "does the graph help?" from "does *learned* message passing help?".
+Besides the plain GCN, two variants are reported as separate rows (same hyper-parameters):
+"GCN + skip" adds a linear term on each provider's own features, and "GraphSAGE" keeps them via its
+root weight. The plain GCN averages a provider into ~100 neighbours, which drowns its own features
+(see diagnose_medicare_gcn.py).
 Metrics are on the test providers: AUPRC (primary, ~10% fraud), AUROC, and F1 / accuracy at the
 threshold that maximises F1 on the validation providers.
 """
@@ -19,16 +23,19 @@ import torch
 import torch.nn.functional as F
 
 from compare_utils import (DEVICE, Results, Timer, add_model_args, balanced_class_weight,
-                           constant_predictor, count_params, fit_gbm, fit_mlp, fit_torch, note_loss,
+                           constant_predictor, count_params, fit_gbm, fit_torch, note_loss,
                            neighbor_mean_features, score, selection_score, set_seed, to_scores)
 from graph_utils import load_processed
 from models import NodeGCN
 
 
-def run_gcn(args, data, w, seed):
+GCN_ROWS = {"gcn": "GCN", "gcn_skip": "GCN + skip", "sage": "GraphSAGE"}
+
+
+def run_gcn(args, data, w, seed, conv="gcn"):
     set_seed(seed)
     d = data.to(DEVICE)
-    model = NodeGCN(d.x.size(1), args.hidden, 2, args.layers, args.dropout)
+    model = NodeGCN(d.x.size(1), args.hidden, 2, args.layers, args.dropout, conv=conv)
     wt = torch.from_numpy(w).to(DEVICE)
     y = d.y.cpu().numpy()
     va, te = d.val_mask.cpu().numpy(), d.test_mask.cpu().numpy()
@@ -53,12 +60,9 @@ def run_gcn(args, data, w, seed):
     return score("binary", y[va], p[va], y[te], p[te]), count_params(model)
 
 
-def run_tabular(args, name, X, y, tr, va, te, w, seed, res):
+def run_gbm(args, name, X, y, tr, va, te, w, seed, res):
     ev = lambda pred: score("binary", y[va], to_scores("binary", pred(X[va])),
                             y[te], to_scores("binary", pred(X[te])))
-    with Timer() as t:
-        pred, n_par = fit_mlp(X[tr], y[tr], X[va], y[va], "binary", 2, args, w, seed)
-    res.add(f"MLP{name}", ev(pred), n_par, t.seconds)
     with Timer() as t:
         pred = fit_gbm(X[tr], y[tr], X[va], y[va], "binary", 2, args, w, seed)
     res.add(f"GBM{name}", ev(pred), None, t.seconds)
@@ -68,6 +72,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("--data", default="data/processed/medicare.pt")
     p.add_argument("--out", default="results/medicare.json")
+    p.add_argument("--convs", nargs="+", choices=list(GCN_ROWS), default=list(GCN_ROWS),
+                   help="graph models to run, each its own row: plain GCN, GCN + skip connection "
+                        "(own-feature term, see models.SkipGCNConv) and GraphSAGE")
     add_model_args(p)
     args = p.parse_args()
 
@@ -81,13 +88,14 @@ def main():
 
     const = constant_predictor("binary", y[tr], 2)
     for seed in range(args.seeds):
-        print(f"seed {seed}: training GCN, MLP, GBM ...", flush=True)
-        with Timer() as t:
-            m, n_par = run_gcn(args, data.clone(), w, seed)
-        res.add("GCN", m, n_par, t.seconds)
-        run_tabular(args, "", X, y, tr, va, te, w, seed, res)
+        print(f"seed {seed}: training {', '.join(GCN_ROWS[c] for c in args.convs)}, GBM ...", flush=True)
+        for conv in args.convs:
+            with Timer() as t:
+                m, n_par = run_gcn(args, data.clone(), w, seed, conv)
+            res.add(GCN_ROWS[conv], m, n_par, t.seconds)
+        run_gbm(args, "", X, y, tr, va, te, w, seed, res)
         if Xn is not None:
-            run_tabular(args, " + nbr-mean", Xn, y, tr, va, te, w, seed, res)
+            run_gbm(args, " + nbr-mean", Xn, y, tr, va, te, w, seed, res)
         res.add("Constant (prior)", score("binary", y[va], to_scores("binary", const(X[va])),
                                           y[te], to_scores("binary", const(X[te]))), None, 0.0)
         print(f"seed {seed} done")

@@ -8,7 +8,32 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, global_add_pool, global_max_pool, global_mean_pool
+from torch_geometric.nn import GCNConv, SAGEConv, global_add_pool, global_max_pool, global_mean_pool
+
+
+class SkipGCNConv(nn.Module):
+    """GCNConv plus a separate linear term on the node's own features: h_i = GCN(x)_i + W_self x_i.
+
+    Plain GCNConv mixes a node's own features into the neighbour average with weight ~1/(degree+1),
+    so on high-degree nodes they are almost lost. The extra term keeps them, like GraphSAGE's root weight."""
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.conv = GCNConv(in_channels, out_channels)
+        self.root = nn.Linear(in_channels, out_channels, bias=False)
+
+    def forward(self, x, edge_index, edge_weight=None):
+        return self.conv(x, edge_index, edge_weight) + self.root(x)
+
+
+class _SAGE(SAGEConv):
+    """SAGEConv (mean aggregation + root weight) that accepts, and ignores, edge weights."""
+
+    def forward(self, x, edge_index, edge_weight=None):
+        return super().forward(x, edge_index)
+
+
+CONVS = {"gcn": GCNConv, "gcn_skip": SkipGCNConv, "sage": _SAGE}
 
 
 class GCNEncoder(nn.Module):
@@ -23,15 +48,17 @@ class GCNEncoder(nn.Module):
         batch_norm: add BatchNorm after each hidden layer.
         final_activation: apply ReLU (+norm/dropout) after the last layer too.
             Use False when the output feeds a linear head or is a logit.
+        conv: "gcn" (plain GCNConv, the default), "gcn_skip" (GCNConv + own-feature term) or
+            "sage" (GraphSAGE, mean aggregation). The variants are reported as separately named models.
     """
 
     def __init__(self, in_channels: int, hidden_channels: int, out_channels: int,
                  num_layers: int = 2, dropout: float = 0.5,
-                 batch_norm: bool = False, final_activation: bool = False):
+                 batch_norm: bool = False, final_activation: bool = False, conv: str = "gcn"):
         super().__init__()
         assert num_layers >= 1
         dims = [in_channels] + [hidden_channels] * (num_layers - 1) + [out_channels]
-        self.convs = nn.ModuleList(GCNConv(dims[i], dims[i + 1]) for i in range(num_layers))
+        self.convs = nn.ModuleList(CONVS[conv](dims[i], dims[i + 1]) for i in range(num_layers))
         self.norms = nn.ModuleList(
             nn.BatchNorm1d(dims[i + 1]) if batch_norm else nn.Identity()
             for i in range(num_layers)
@@ -56,11 +83,11 @@ class GCNEncoder(nn.Module):
 # --------------------------------------------------------------------------
 class NodeGCN(nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels,
-                 num_layers=2, dropout=0.5, batch_norm=False):
+                 num_layers=2, dropout=0.5, batch_norm=False, conv="gcn"):
         super().__init__()
         self.encoder = GCNEncoder(in_channels, hidden_channels, out_channels,
                                   num_layers, dropout, batch_norm,
-                                  final_activation=False)
+                                  final_activation=False, conv=conv)
 
     def forward(self, x, edge_index, edge_weight=None):
         return self.encoder(x, edge_index, edge_weight)
@@ -79,10 +106,10 @@ class EdgeGCN(nn.Module):
     """
 
     def __init__(self, in_channels, hidden_channels, embed_channels,
-                 num_layers=2, dropout=0.5, num_edge_classes: Optional[int] = None):
+                 num_layers=2, dropout=0.5, num_edge_classes: Optional[int] = None, conv="gcn"):
         super().__init__()
         self.encoder = GCNEncoder(in_channels, hidden_channels, embed_channels,
-                                  num_layers, dropout, final_activation=False)
+                                  num_layers, dropout, final_activation=False, conv=conv)
         self.edge_head = None
         if num_edge_classes is not None:
             self.edge_head = nn.Sequential(
@@ -116,11 +143,11 @@ _POOL = {"mean": global_mean_pool, "sum": global_add_pool, "max": global_max_poo
 
 class GraphGCN(nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels,
-                 num_layers=3, dropout=0.5, pooling="mean", batch_norm=True):
+                 num_layers=3, dropout=0.5, pooling="mean", batch_norm=True, conv="gcn"):
         super().__init__()
         self.encoder = GCNEncoder(in_channels, hidden_channels, hidden_channels,
                                   num_layers, dropout, batch_norm,
-                                  final_activation=True)
+                                  final_activation=True, conv=conv)
         self.pool = _POOL[pooling]
         self.head = nn.Sequential(
             nn.Linear(hidden_channels, hidden_channels),

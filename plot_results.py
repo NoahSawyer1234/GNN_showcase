@@ -1,18 +1,18 @@
 """Plot the results/*.json files written by the compare_*.py scripts.
 
   python plot_results.py                          # reads results/*.json, writes figures/
-  python plot_results.py --results results/gdelt_*.json --theme dark --format svg
+  python plot_results.py --results results/medicare.json --theme dark --format svg
 
 Per results file (one figure each): one panel per metric, one column per model.
   dot            one seed (jittered sideways so seeds don't overlap)
   thick bar      mean over seeds, with a thin +/- 1 std whisker
-  colour         model family (GCN, MLP, GBM); a diamond marks the "+ nbr-mean" variants
-                 (MLP/GBM given hand-engineered neighbour-average features)
+  colour         model family (graph models, GBM); a diamond marks the "+ nbr-mean" variant
+                 (GBM given hand-engineered neighbour-average features)
   grey line      the trivial "predict the prior / mean" reference
 The first panel is the headline metric; every panel says whether higher or lower is better.
 Every panel has its own y-axis (one measure per axis, never a dual axis).
 
-Also written: figures/overview.png (the headline metric of every task, GCN / MLP / GBM only) and
+Also written: figures/overview.png (the headline metric of every task, graph models / GBM only) and
 figures/summary.csv (the same numbers as a table, so nothing depends on reading a colour).
 Colours are the validated 3-slot categorical palette (blue, orange, aqua) in both themes.
 """
@@ -32,9 +32,9 @@ from matplotlib.lines import Line2D  # noqa: E402
 
 THEMES = {
     "light": dict(surface="#fcfcfb", ink="#0b0b0b", ink2="#52514e", muted="#898781", grid="#e1e0d9",
-                  axis="#c3c2b7", GCN="#2a78d6", MLP="#eb6834", GBM="#1baf7a"),
+                  axis="#c3c2b7", GCN="#2a78d6", GBM="#1baf7a"),
     "dark": dict(surface="#1a1a19", ink="#f0efec", ink2="#c3c2b7", muted="#898781", grid="#2c2c2a",
-                 axis="#383835", GCN="#3987e5", MLP="#d95926", GBM="#199e70"),
+                 axis="#383835", GCN="#3987e5", GBM="#199e70"),
 }
 PRIMARY_PRIORITY = ["auprc", "macro_f1", "auroc", "mae"]
 METRIC_ORDER = ["auprc", "macro_f1", "auroc", "ap", "f1", "accuracy", "auroc_new", "ap_new", "mae", "rmse", "r2"]
@@ -43,11 +43,8 @@ NAMES = {"auprc": "AUPRC", "auroc": "AUROC", "ap": "Average precision", "f1": "F
          "accuracy": "Accuracy", "mae": "MAE", "rmse": "RMSE", "r2": "R²", "auroc_new": "AUROC, new links only",
          "ap_new": "AP, new links only"}
 TASK_NAMES = {"medicare": "Medicare fraud · node classification",
-              "gdelt_node_class": "GDELT · node class", "gdelt_node_reg": "GDELT · node regression",
-              "gdelt_link_prediction": "GDELT · link prediction", "gdelt_edge_class": "GDELT · edge class",
-              "gdelt_graph_reg": "GDELT · graph regression", "gdelt_graph_cls": "GDELT · graph classification",
               "wildfire_pixel": "Wildfire · pixel fire", "wildfire_patch": "Wildfire · patch burn fraction"}
-FAMILIES = ("GCN", "MLP", "GBM")
+FAMILIES = ("GCN", "GBM")
 
 
 # ------------------------------------------ loading ------------------------------------------
@@ -65,6 +62,9 @@ def is_reference(name):
 
 
 def family(name):
+    """Colour group. Graph models (GCN, GCN + skip, GraphSAGE) share the GCN colour."""
+    if name.startswith("GraphSAGE"):
+        return "GCN"
     return next((f for f in FAMILIES if name.startswith(f)), None)
 
 
@@ -89,7 +89,7 @@ def style_axes(ax, t):
 
 
 def label_for(name):
-    return name.replace(" + nbr-mean", "\n+nbr")
+    return name.replace(" + nbr-mean", "\n+nbr").replace(" + skip", "\n+ skip")
 
 
 def draw_panel(ax, res, metric, models, t, rng, show_reference=True):
@@ -187,9 +187,9 @@ def overview_figure(results, t, out_path, fmt, dpi):
                      fontweight="bold", pad=22)
     for ax in axes.ravel()[len(results):]:
         ax.set_visible(False)
-    fig.suptitle("GCN vs MLP vs GBM: headline metric per task (test set)", x=0.01, ha="left", fontsize=11,
+    fig.suptitle("Graph models vs GBM: headline metric per task (test set)", x=0.01, ha="left", fontsize=11,
                  color=t["ink"], fontweight="bold")
-    fig.legend(handles=legend_handles(results[0], FAMILIES, t)[:3] +
+    fig.legend(handles=legend_handles(results[0], FAMILIES, t)[:len(FAMILIES)] +
                [Line2D([0], [0], color=t["muted"], linewidth=1.0, label="predict prior / mean (reference)"),
                 Line2D([0], [0], color=t["ink2"], linewidth=2.6, label="mean ± std over seeds (dots = seeds)")],
                loc="lower center", ncol=5, frameon=False, fontsize=8, labelcolor=t["ink2"],

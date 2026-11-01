@@ -1,11 +1,9 @@
-"""Generate tiny synthetic stand-ins for the three datasets, in the REAL file formats.
+"""Generate tiny synthetic stand-ins for the two datasets, in the REAL file formats.
 
   python make_synthetic_data.py --out data/synthetic
 
 Use them to smoke-test the preprocessing pipelines before downloading the real data:
   python preprocess_medicare.py --raw-dir data/synthetic/medicare --out data/synthetic/processed/medicare.pt
-  python preprocess_gdelt.py    --raw-dir data/synthetic/gdelt_v1  --out data/synthetic/processed/gdelt_v1.pt
-  python preprocess_gdelt.py    --raw-dir data/synthetic/gdelt_v2  --out data/synthetic/processed/gdelt_v2.pt
   python preprocess_wildfire.py --raw-dir data/synthetic/wildfire  --out-dir data/synthetic/processed/wildfire
 
 The values are random with a little planted structure; they are NOT realistic data and any model
@@ -13,15 +11,12 @@ accuracy on them is meaningless.
 """
 import argparse
 import struct
-import zipfile
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from scipy.ndimage import gaussian_filter
 
-from preprocess_gdelt import gdelt_columns
 from preprocess_medicare import CHRONIC, DIAG, PROC
 
 
@@ -81,44 +76,6 @@ def make_medicare(out: Path, rng, n_prov=80, n_bene=600, n_phys=120, n_claims=40
                              errors="ignore")
     ip.to_csv(out / "Train_Inpatientdata-1542865627584.csv", index=False, date_format="%Y-%m-%d")
     op.to_csv(out / "Train_Outpatientdata-1542865627584.csv", index=False, date_format="%Y-%m-%d")
-
-
-# -------------------------------------- GDELT --------------------------------------
-def make_gdelt(out: Path, rng, version: int, n_days=20, files_per_day=1, events_per_file=3000):
-    out.mkdir(parents=True, exist_ok=True)
-    countries = ["USA", "CHN", "RUS", "GBR", "FRA", "DEU", "IND", "ISR", "IRN", "UKR", "BRA", "JPN",
-                 "TUR", "EGY", "NGA", "AUS"]
-    k = len(countries)
-    propensity = rng.random((k, k))                     # latent pair "conflictiness"
-    propensity = (propensity + propensity.T) / 2
-    popularity = rng.dirichlet(np.ones(k) * 0.7)
-    cols = gdelt_columns(58 if version == 1 else 61)
-    day0 = datetime(2025, 1, 1)
-    for d in range(n_days):
-        for f in range(files_per_day):
-            stamp = day0 + timedelta(days=d, hours=f * (24 // files_per_day))
-            n = events_per_file
-            a1 = rng.choice(k, n, p=popularity)
-            a2 = rng.choice(k, n, p=popularity)
-            dom = rng.random(n) < 0.35
-            a2 = np.where(dom, a1, a2)
-            prob_conf = propensity[a1, a2] * 0.8
-            quad = np.where(rng.random(n) < prob_conf, rng.integers(3, 5, n), rng.integers(1, 3, n))
-            gold = np.where(quad <= 2, rng.normal(3, 2, n), rng.normal(-5, 2, n)).clip(-10, 10)
-            data = {c: [""] * n for c in cols}
-            data["GLOBALEVENTID"] = np.arange(n) + d * 10_000_000 + f * 100_000
-            data["SQLDATE"] = [stamp.strftime("%Y%m%d")] * n
-            data["Actor1CountryCode"] = [countries[i] if rng.random() > 0.05 else "" for i in a1]
-            data["Actor2CountryCode"] = [countries[i] if rng.random() > 0.10 else "" for i in a2]
-            data["QuadClass"] = quad
-            data["GoldsteinScale"] = np.round(gold, 1)
-            data["NumMentions"] = rng.integers(1, 30, n)
-            data["AvgTone"] = np.round(rng.normal(-2 - 2 * (quad > 2), 3, n), 3)
-            data["DATEADDED"] = [stamp.strftime("%Y%m%d" if version == 1 else "%Y%m%d%H%M%S")] * n
-            df = pd.DataFrame(data)[cols]
-            name = (f"{stamp:%Y%m%d}.export.CSV" if version == 1 else f"{stamp:%Y%m%d%H%M%S}.export.CSV")
-            with zipfile.ZipFile(out / f"{name}.zip", "w", zipfile.ZIP_DEFLATED) as z:
-                z.writestr(name, df.to_csv(sep="\t", header=False, index=False))
 
 
 # ------------------------------------- Wildfire -------------------------------------
@@ -209,8 +166,6 @@ def main():
     args = p.parse_args()
     out, rng = Path(args.out), np.random.default_rng(args.seed)
     make_medicare(out / "medicare", rng)
-    make_gdelt(out / "gdelt_v1", rng, version=1, n_days=20, files_per_day=1)
-    make_gdelt(out / "gdelt_v2", rng, version=2, n_days=12, files_per_day=4, events_per_file=1500)
     make_wildfire(out / "wildfire", rng)
     print(f"synthetic data written to {out}")
 

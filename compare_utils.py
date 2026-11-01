@@ -1,14 +1,11 @@
-"""Shared pieces for the GCN vs MLP vs GBM comparison scripts.
+"""Shared pieces for the GCN vs GBM comparison scripts.
 
 Fairness rules every compare_*.py follows
   * identical train / val / test data for every model (splits come from the preprocessing step)
-  * node-level tasks: MLP = the GCN with its graph convolutions replaced by plain Linear layers:
-    same width, depth, dropout, optimiser, learning rate, weight decay, epochs and early stopping,
-    so the only difference is message passing (parameter counts are equal, see the `params` column).
-    Edge- and graph-level tasks use the same hyper-parameters, but the tabular models take pair /
-    pooled features and have no GNN-specific heads, so their parameter counts differ.
-  * GBM (LightGBM, or scikit-learn's HistGradientBoosting if LightGBM is missing) with early
-    stopping on the same validation set
+  * every graph model (GCN and its named variants) uses the same width, depth, dropout, optimiser,
+    learning rate, weight decay and early-stopping rule (fit_torch)
+  * the baseline is a GBM (LightGBM, or scikit-learn's HistGradientBoosting if LightGBM is missing) on
+    the same rows, with early stopping on the same validation set
   * every model is selected on the validation set with the same criterion, and binary decision
     thresholds are tuned on validation only, never on test
   * class imbalance is handled identically (the same class weights in the loss / sample weights)
@@ -36,8 +33,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from sklearn.metrics import (accuracy_score, average_precision_score, f1_score, mean_absolute_error,
                              precision_recall_curve, r2_score, roc_auc_score)
 from torch_geometric.utils import scatter
@@ -129,23 +124,6 @@ def to_scores(kind, proba):
 
 
 # ------------------------------------- models -------------------------------------
-class MLP(nn.Module):
-    """Same layout as NodeGCN/GCNEncoder with every GCNConv replaced by a Linear layer."""
-
-    def __init__(self, in_ch, hidden, out_ch, num_layers=2, dropout=0.5):
-        super().__init__()
-        dims = [in_ch] + [hidden] * (num_layers - 1) + [out_ch]
-        self.lins = nn.ModuleList(nn.Linear(a, b) for a, b in zip(dims[:-1], dims[1:]))
-        self.dropout = dropout
-
-    def forward(self, x):
-        for i, lin in enumerate(self.lins):
-            x = lin(x)
-            if i < len(self.lins) - 1:
-                x = F.dropout(F.relu(x), p=self.dropout, training=self.training)
-        return x
-
-
 def count_params(model) -> int:
     return sum(p.numel() for p in model.parameters())
 
@@ -160,7 +138,7 @@ def note_loss(loss):
 
 
 def fit_torch(model, train_epoch, val_score, args):
-    """Early-stopped training loop shared by every GCN and MLP (so both get the identical rule).
+    """Early-stopped training loop shared by every graph model (so all get the identical rule).
 
     One epoch = `train_epoch(opt)`; `val_score()` returns a float, higher is better. Training stops at the
     FIRST of:
@@ -212,42 +190,6 @@ def fit_torch(model, train_epoch, val_score, args):
     LAST_FIT = {"epochs": epoch, "best_epoch": best_epoch, "stopped_by": reason,
                 "final_lr": float(opt.param_groups[0]["lr"]), "best_val": float(best)}
     return best
-
-
-def fit_mlp(Xtr, ytr, Xva, yva, kind, num_classes, args, class_weight=None, seed=0):
-    """Train an MLP on tabular rows. Returns (predict, n_params); predict(X) -> proba [n, C] or values [n]."""
-    set_seed(seed)
-    cls = kind != "regression"
-    model = MLP(Xtr.shape[1], args.hidden, num_classes if cls else 1, args.layers, args.dropout)
-    Xt = torch.from_numpy(np.asarray(Xtr, dtype=np.float32))
-    yt = torch.from_numpy(np.asarray(ytr)).long() if cls else torch.from_numpy(np.asarray(ytr, dtype=np.float32))
-    w = torch.from_numpy(class_weight).to(DEVICE) if (cls and class_weight is not None) else None
-    bs = args.mlp_batch
-
-    def predict(X):
-        model.eval()
-        outs = []
-        with torch.no_grad():
-            for i in range(0, len(X), 65536):
-                o = model(torch.from_numpy(np.asarray(X[i:i + 65536], dtype=np.float32)).to(DEVICE))
-                outs.append(F.softmax(o, 1) if cls else o.squeeze(-1))
-        return torch.cat(outs).cpu().numpy() if outs else np.zeros((0, num_classes) if cls else 0)
-
-    def train_epoch(opt):
-        perm = torch.randperm(len(Xt))
-        for i in range(0, len(perm), bs):
-            idx = perm[i:i + bs]
-            xb, yb = Xt[idx].to(DEVICE), yt[idx].to(DEVICE)
-            out = model(xb)
-            loss = F.cross_entropy(out, yb, weight=w) if cls else F.mse_loss(out.squeeze(-1), yb)
-            opt.zero_grad()
-            loss.backward()
-            note_loss(loss)
-            opt.step()
-
-    fit_torch(model, train_epoch, lambda: selection_score(kind, yva, to_scores(kind, predict(Xva))),
-              args)
-    return predict, count_params(model)
 
 
 def resolve_gbm_backend(name):
@@ -333,7 +275,7 @@ class Results:
         r = self.rows.setdefault(model, {"params": params, "runs": []})
         r["runs"].append({**metrics, "seconds": seconds})
         note = ""
-        if LAST_FIT is not None:                       # a torch model (GCN / MLP) was just trained
+        if LAST_FIT is not None:                       # a graph model was just trained
             r.setdefault("fit", []).append(LAST_FIT)
             note = (f"; {LAST_FIT['epochs']} epochs, best at {LAST_FIT['best_epoch']}, "
                     f"stopped by {LAST_FIT['stopped_by']}")
@@ -386,7 +328,7 @@ class Timer:
 
 
 def add_model_args(p):
-    """CLI flags shared by every compare script (the GCN and MLP use the same ones)."""
+    """CLI flags shared by every compare script (every graph model uses the same ones)."""
     g = p.add_argument_group("shared model / training settings")
     g.add_argument("--hidden", type=int, default=64)
     g.add_argument("--layers", type=int, default=2)
@@ -400,7 +342,6 @@ def add_model_args(p):
                    help="also stop if mean training loss has not improved for this many epochs (0 = off)")
     g.add_argument("--lr-decay", type=float, default=0.5,
                    help="halve the LR after patience/3 epochs without validation improvement (1.0 = off)")
-    g.add_argument("--mlp-batch", type=int, default=2048)
     g.add_argument("--seeds", type=int, default=3, help="repeat everything with seeds 0..N-1")
     g.add_argument("--gbm-backend", choices=["auto", "lightgbm", "sklearn"], default="auto",
                    help="auto = LightGBM, except scikit-learn on macOS")
@@ -413,5 +354,5 @@ def add_model_args(p):
     g.add_argument("--gbm-min-child", type=int, default=20,
                    help="LightGBM min_child_samples; lower it (e.g. 3) for graph-level tasks with few snapshots")
     g.add_argument("--neighbor-baselines", action="store_true",
-                   help="also run MLP/GBM on [x, mean of neighbours' x] (graph-aware tabular baseline)")
+                   help="also run the GBM on [x, mean of neighbours' x] (graph-aware tabular baseline)")
     return p

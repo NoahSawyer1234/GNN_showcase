@@ -1,0 +1,25 @@
+task,model,metric,mean,std,n_seeds
+medicare,GCN,auprc,0.343191,0.003759,5
+medicare,GCN,auroc,0.794479,0.001798,5
+medicare,GCN,f1,0.332727,0.006009,5
+medicare,GCN,accuracy,0.788540,0.010080,5
+medicare,GCN + skip,auprc,0.687636,0.010834,5
+medicare,GCN + skip,auroc,0.940608,0.003521,5
+medicare,GCN + skip,f1,0.617920,0.022445,5
+medicare,GCN + skip,accuracy,0.916636,0.006877,5
+medicare,GraphSAGE,auprc,0.718077,0.006758,5
+medicare,GraphSAGE,auroc,0.948646,0.000871,5
+medicare,GraphSAGE,f1,0.611474,0.016527,5
+medicare,GraphSAGE,accuracy,0.928835,0.001754,5
+medicare,GBM,auprc,0.708544,0.000000,5
+medicare,GBM,auroc,0.935951,0.000000,5
+medicare,GBM,f1,0.637931,0.000000,5
+medicare,GBM,accuracy,0.922366,0.000000,5
+medicare,GBM + nbr-mean,auprc,0.699712,0.000000,5
+medicare,GBM + nbr-mean,auroc,0.944500,0.000000,5
+medicare,GBM + nbr-mean,f1,0.646809,0.000000,5
+medicare,GBM + nbr-mean,accuracy,0.923290,0.000000,5
+medicare,Constant (prior),auprc,0.093346,0.000000,5
+medicare,Constant (prior),auroc,0.500000,0.000000,5
+medicare,Constant (prior),f1,0.170752,0.000000,5
+medicare,Constant (prior),accuracy,0.093346,0.000000,5

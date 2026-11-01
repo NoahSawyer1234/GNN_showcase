@@ -1,4 +1,4 @@
-"""GCN vs MLP vs GBM on Next Day Wildfire Spread.
+"""GCN vs GBM on Next Day Wildfire Spread.
 
   python preprocess_wildfire.py --raw-dir data/raw/wildfire --out-dir data/processed/wildfire
   python compare_wildfire.py --task pixel
@@ -10,13 +10,14 @@ Tasks
   patch   (graph level) fraction of the patch burning tomorrow.                     MAE / RMSE / R2
 
 What each model sees
-  GCN        the pixel's 14 features + its 8-neighbour grid (messages from neighbouring pixels)
-  MLP / GBM  the pixel's own 14 features only. The GCN therefore has spatial context the tabular models
-             lack; --neighbor-baselines gives them [x, mean of the 8 neighbours' x] for a fairer reference
+  GCN        the pixel's 14 features + its 8-neighbour grid (messages from neighbouring pixels);
+             "GCN + skip" and "GraphSAGE" are reported as separately named rows (--convs)
+  GBM        the pixel's own 14 features only. The GCN therefore has spatial context the GBM lacks;
+             --neighbor-baselines gives it [x, mean of the 8 neighbours' x] for a fairer reference
              (that baseline is effectively a one-layer convolution; a CNN is the natural next comparison).
-  patch      MLP / GBM get mean/max/std of the pixel features over the patch; the GCN pools learned node states.
+  patch      the GBM gets mean/max/std of the pixel features over the patch; the GCN pools learned node states.
 
-Cost control: tabular models train on --pixels-per-sample random labelled pixels from each training
+Cost control: the GBM trains on --pixels-per-sample random labelled pixels from each training
 patch; ALL labelled pixels of the first --max-eval-samples validation/test patches are scored by every
 model. The GCN trains on whole patches (--max-train-samples). Class weights (capped at
 --max-class-weight x) are the same for every model.
@@ -31,10 +32,12 @@ import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 
 from compare_utils import (DEVICE, Results, Timer, add_model_args, balanced_class_weight,
-                           constant_predictor, count_params, fit_gbm, fit_mlp, fit_torch, note_loss,
+                           constant_predictor, count_params, fit_gbm, fit_torch, note_loss,
                            neighbor_mean_features, score, selection_score, set_seed, to_scores)
 from models import GraphGCN, NodeGCN
 from preprocess_wildfire import WildfireGridDataset
+
+GCN_ROWS = {"gcn": "GCN", "gcn_skip": "GCN + skip", "sage": "GraphSAGE"}
 
 
 # ------------------------------------ pixel task ------------------------------------
@@ -51,9 +54,9 @@ def pixel_table(ds, n, per_sample, rng, nbr):
     return np.concatenate(Xs), np.concatenate(ys)
 
 
-def gcn_pixel(args, dtr, dva, dte, w, seed):
+def gcn_pixel(args, dtr, dva, dte, w, seed, conv):
     set_seed(seed)
-    model = NodeGCN(dtr[0].x.size(1), args.hidden, 2, args.layers, args.dropout)
+    model = NodeGCN(dtr[0].x.size(1), args.hidden, 2, args.layers, args.dropout, conv=conv)
     wt = torch.from_numpy(w).to(DEVICE)
     ltr = DataLoader(dtr, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
     mk = lambda ds: DataLoader(ds, batch_size=args.batch_size, num_workers=args.workers)
@@ -96,25 +99,23 @@ def run_pixel(args, root, res):
         print(f"seed {seed}: train rows {len(ytr):,} (fire {ytr.mean():.2%}), eval rows {len(yva):,}/{len(yte):,}, "
               f"class weights {np.round(w, 2).tolist()}")
 
-        with Timer() as t:
-            m, n_par = gcn_pixel(args, ds_tr[:n_tr], ds_va[:n_ev], ds_te[:n_ev], w, seed)
-        res.add("GCN", m, n_par, t.seconds)
+        for conv in args.convs:
+            with Timer() as t:
+                m, n_par = gcn_pixel(args, ds_tr[:n_tr], ds_va[:n_ev], ds_te[:n_ev], w, seed, conv)
+            res.add(GCN_ROWS[conv], m, n_par, t.seconds)
 
-        def tabular(name, tr_, va_, te_):
+        def gbm(name, tr_, va_, te_):
             ev = lambda pred: score("binary", va_[1], to_scores("binary", pred(va_[0])),
                                     te_[1], to_scores("binary", pred(te_[0])))
-            with Timer() as t:
-                pred, n_par = fit_mlp(*tr_, *va_, "binary", 2, args, w, seed)
-            res.add(f"MLP{name}", ev(pred), n_par, t.seconds)
             with Timer() as t:
                 pred = fit_gbm(*tr_, *va_, "binary", 2, args, w, seed)
             res.add(f"GBM{name}", ev(pred), None, t.seconds)
 
-        tabular("", (Xtr, ytr), (Xva, yva), (Xte, yte))
+        gbm("", (Xtr, ytr), (Xva, yva), (Xte, yte))
         if args.neighbor_baselines:
             tabs = [pixel_table(ds_tr, n_tr, args.pixels_per_sample, np.random.default_rng(seed), True),
                     pixel_table(ds_va, n_ev, None, rng, True), pixel_table(ds_te, n_ev, None, rng, True)]
-            tabular(" + nbr-mean", *tabs)
+            gbm(" + nbr-mean", *tabs)
         c = constant_predictor("binary", ytr, 2)
         res.add("Constant (prior)", score("binary", yva, to_scores("binary", c(Xva)), yte,
                                           to_scores("binary", c(Xte))), None, 0.0)
@@ -129,9 +130,9 @@ def patch_table(ds, n):
     return np.stack(X).astype(np.float32), ds.graph_y[:len(X), 0].astype(np.float32)
 
 
-def gcn_patch(args, dtr, dva, dte, seed):
+def gcn_patch(args, dtr, dva, dte, seed, conv):
     set_seed(seed)
-    model = GraphGCN(dtr[0].x.size(1), args.hidden, 1, args.layers, args.dropout, args.pooling)
+    model = GraphGCN(dtr[0].x.size(1), args.hidden, 1, args.layers, args.dropout, args.pooling, conv=conv)
     ltr = DataLoader(dtr, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
     mk = lambda ds: DataLoader(ds, batch_size=args.batch_size, num_workers=args.workers)
 
@@ -165,13 +166,11 @@ def run_patch(args, root, res):
     (Xtr, ytr), (Xva, yva), (Xte, yte) = patch_table(ds_tr, n_tr), patch_table(ds_va, n_ev), patch_table(ds_te, n_ev)
     print(f"patches train/val/test: {len(ytr)}/{len(yva)}/{len(yte)}")
     for seed in range(args.seeds):
-        with Timer() as t:
-            m, n_par = gcn_patch(args, ds_tr[:n_tr], ds_va[:n_ev], ds_te[:n_ev], seed)
-        res.add("GCN", m, n_par, t.seconds)
+        for conv in args.convs:
+            with Timer() as t:
+                m, n_par = gcn_patch(args, ds_tr[:n_tr], ds_va[:n_ev], ds_te[:n_ev], seed, conv)
+            res.add(GCN_ROWS[conv], m, n_par, t.seconds)
         ev = lambda pred: score("regression", yva, pred(Xva), yte, pred(Xte))
-        with Timer() as t:
-            pred, n_par = fit_mlp(Xtr, ytr, Xva, yva, "regression", 1, args, None, seed)
-        res.add("MLP", ev(pred), n_par, t.seconds)
         with Timer() as t:
             pred = fit_gbm(Xtr, ytr, Xva, yva, "regression", 1, args, None, seed)
         res.add("GBM", ev(pred), None, t.seconds)
@@ -186,13 +185,15 @@ def main():
     p.add_argument("--connectivity", type=int, choices=[4, 8], default=8)
     p.add_argument("--batch-size", type=int, default=16, help="patches per GCN batch")
     p.add_argument("--workers", type=int, default=0)
-    p.add_argument("--pixels-per-sample", type=int, default=256, help="tabular training pixels per patch")
+    p.add_argument("--pixels-per-sample", type=int, default=256, help="GBM training pixels per patch")
     p.add_argument("--max-train-samples", type=int, default=10 ** 9)
     p.add_argument("--max-eval-samples", type=int, default=500, help="val/test patches scored (all models)")
     p.add_argument("--max-class-weight", type=float, default=20.0, help="cap on fire/no-fire weight ratio")
     p.add_argument("--pooling", choices=["mean", "sum", "max"], default="mean", help="patch-level GCN readout")
+    p.add_argument("--convs", nargs="+", choices=list(GCN_ROWS), default=list(GCN_ROWS),
+                   help="graph models to run, each its own row (plain GCN, GCN + skip connection, GraphSAGE)")
     add_model_args(p)
-    p.set_defaults(epochs=200, patience=15, loss_patience=40, lr=0.005, wd=1e-5, dropout=0.2, gbm_trees=300, mlp_batch=4096, seeds=1)
+    p.set_defaults(epochs=200, patience=15, loss_patience=40, lr=0.005, wd=1e-5, dropout=0.2, gbm_trees=300, seeds=1)
     args = p.parse_args()
     args.out = args.out or f"results/wildfire_{args.task}.json"
 
