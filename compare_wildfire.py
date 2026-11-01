@@ -23,6 +23,8 @@ model. The GCN trains on whole patches (--max-train-samples). Class weights (cap
 """
 import argparse
 
+import compare_utils  # noqa: F401  (must be first: imports LightGBM before PyTorch)
+
 import numpy as np
 import torch
 import torch.nn.functional as F

@@ -12,6 +12,8 @@ threshold that maximises F1 on the validation providers.
 """
 import argparse
 
+import compare_utils  # noqa: F401  (must be first: imports LightGBM before PyTorch)
+
 import numpy as np
 import torch
 import torch.nn.functional as F

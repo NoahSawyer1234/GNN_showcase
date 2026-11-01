@@ -13,6 +13,10 @@ Fairness rules every compare_*.py follows
     thresholds are tuned on validation only, never on test
   * class imbalance is handled identically (the same class weights in the loss / sample weights)
 """
+try:  # Import LightGBM BEFORE PyTorch: on macOS both bundle an OpenMP runtime and the
+    import lightgbm  # noqa: F401  # reverse order can segfault (use --gbm-backend sklearn if it still does).
+except ImportError:
+    pass
 import copy
 import json
 import random
