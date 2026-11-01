@@ -43,6 +43,8 @@ NAMES = {"auprc": "AUPRC", "auroc": "AUROC", "ap": "Average precision", "f1": "F
          "accuracy": "Accuracy", "mae": "MAE", "rmse": "RMSE", "r2": "R²", "auroc_new": "AUROC, new links only",
          "ap_new": "AP, new links only"}
 TASK_NAMES = {"medicare": "Medicare fraud · node classification",
+              "underwriting_company": "Underwriting fraud · companies (out of time)",
+              "underwriting_admin": "Underwriting fraud · administrators (out of time)",
               "wildfire_pixel": "Wildfire · pixel fire", "wildfire_patch": "Wildfire · patch burn fraction"}
 FAMILIES = ("GCN", "GBM")
 

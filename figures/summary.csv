@@ -23,3 +23,51 @@ medicare,Constant (prior),auprc,0.093346,0.000000,5
 medicare,Constant (prior),auroc,0.500000,0.000000,5
 medicare,Constant (prior),f1,0.170752,0.000000,5
 medicare,Constant (prior),accuracy,0.093346,0.000000,5
+underwriting_admin,GCN,auprc,0.455775,0.002625,5
+underwriting_admin,GCN,auroc,0.683921,0.001443,5
+underwriting_admin,GCN,f1,0.527462,0.004366,5
+underwriting_admin,GCN,accuracy,0.608889,0.004176,5
+underwriting_admin,GCN + skip,auprc,0.457640,0.003411,5
+underwriting_admin,GCN + skip,auroc,0.692701,0.002753,5
+underwriting_admin,GCN + skip,f1,0.516525,0.020930,5
+underwriting_admin,GCN + skip,accuracy,0.630000,0.019927,5
+underwriting_admin,GraphSAGE,auprc,0.440050,0.003367,5
+underwriting_admin,GraphSAGE,auroc,0.689680,0.003413,5
+underwriting_admin,GraphSAGE,f1,0.533934,0.007448,5
+underwriting_admin,GraphSAGE,accuracy,0.627222,0.004779,5
+underwriting_admin,GBM,auprc,0.397037,0.000000,5
+underwriting_admin,GBM,auroc,0.660597,0.000000,5
+underwriting_admin,GBM,f1,0.500840,0.000000,5
+underwriting_admin,GBM,accuracy,0.587500,0.000000,5
+underwriting_admin,GBM + nbr-mean,auprc,0.440204,0.000000,5
+underwriting_admin,GBM + nbr-mean,auroc,0.683018,0.000000,5
+underwriting_admin,GBM + nbr-mean,f1,0.504167,0.000000,5
+underwriting_admin,GBM + nbr-mean,accuracy,0.669444,0.000000,5
+underwriting_admin,Constant (prior),auprc,0.304167,0.000000,5
+underwriting_admin,Constant (prior),auroc,0.500000,0.000000,5
+underwriting_admin,Constant (prior),f1,0.466454,0.000000,5
+underwriting_admin,Constant (prior),accuracy,0.304167,0.000000,5
+underwriting_company,GCN,auprc,0.602009,0.000824,5
+underwriting_company,GCN,auroc,0.768318,0.000573,5
+underwriting_company,GCN,f1,0.642912,0.001440,5
+underwriting_company,GCN,accuracy,0.677084,0.010142,5
+underwriting_company,GCN + skip,auprc,0.604466,0.000975,5
+underwriting_company,GCN + skip,auroc,0.770605,0.000936,5
+underwriting_company,GCN + skip,f1,0.641921,0.003510,5
+underwriting_company,GCN + skip,accuracy,0.681206,0.009977,5
+underwriting_company,GraphSAGE,auprc,0.608036,0.000342,5
+underwriting_company,GraphSAGE,auroc,0.770896,0.000972,5
+underwriting_company,GraphSAGE,f1,0.642995,0.002183,5
+underwriting_company,GraphSAGE,accuracy,0.675265,0.013774,5
+underwriting_company,GBM,auprc,0.583840,0.000000,5
+underwriting_company,GBM,auroc,0.757477,0.000000,5
+underwriting_company,GBM,f1,0.637314,0.000000,5
+underwriting_company,GBM,accuracy,0.652925,0.000000,5
+underwriting_company,GBM + nbr-mean,auprc,0.593771,0.000000,5
+underwriting_company,GBM + nbr-mean,auroc,0.760583,0.000000,5
+underwriting_company,GBM + nbr-mean,f1,0.638212,0.000000,5
+underwriting_company,GBM + nbr-mean,accuracy,0.673689,0.000000,5
+underwriting_company,Constant (prior),auprc,0.353895,0.000000,5
+underwriting_company,Constant (prior),auroc,0.500000,0.000000,5
+underwriting_company,Constant (prior),f1,0.522781,0.000000,5
+underwriting_company,Constant (prior),accuracy,0.353895,0.000000,5
