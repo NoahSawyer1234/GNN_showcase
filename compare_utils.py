@@ -13,10 +13,15 @@ Fairness rules every compare_*.py follows
     thresholds are tuned on validation only, never on test
   * class imbalance is handled identically (the same class weights in the loss / sample weights)
 """
-try:  # Import LightGBM BEFORE PyTorch: on macOS both bundle an OpenMP runtime and the
-    import lightgbm  # noqa: F401  # reverse order can segfault (use --gbm-backend sklearn if it still does).
-except ImportError:
-    pass
+import platform
+
+if platform.system() != "Darwin":
+    try:  # Linux/Windows: import LightGBM before PyTorch so both OpenMP runtimes initialise cleanly.
+        import lightgbm  # noqa: F401
+    except ImportError:
+        pass
+# On macOS LightGBM is NOT imported here (and --gbm-backend auto uses scikit-learn): LightGBM and PyTorch
+# ship different OpenMP runtimes there and loading both has caused segmentation faults in either order.
 import copy
 import json
 import random
