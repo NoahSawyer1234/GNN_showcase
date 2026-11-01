@@ -22,9 +22,15 @@ if platform.system() != "Darwin":
         pass
 # On macOS LightGBM is NOT imported here (and --gbm-backend auto uses scikit-learn): LightGBM and PyTorch
 # ship different OpenMP runtimes there and loading both has caused segmentation faults in either order.
+import atexit
 import copy
 import json
+import pickle
 import random
+import shutil
+import subprocess
+import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -35,6 +41,8 @@ import torch.nn.functional as F
 from sklearn.metrics import (accuracy_score, average_precision_score, f1_score, mean_absolute_error,
                              precision_recall_curve, r2_score, roc_auc_score)
 from torch_geometric.utils import scatter
+
+import gbm_worker
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -214,35 +222,41 @@ def resolve_gbm_backend(name):
     return name
 
 
+def resolve_gbm_isolation(name):
+    """Run the GBM in a separate process? auto = yes on macOS (PyTorch + OpenMP segfaults), no elsewhere."""
+    return name == "yes" or (name == "auto" and platform.system() == "Darwin")
+
+
+def _run_gbm_worker(mode, workdir):
+    cmd = [sys.executable, str(Path(__file__).with_name("gbm_worker.py")), mode, str(workdir)]
+    r = subprocess.run(cmd)
+    if r.returncode != 0:
+        raise RuntimeError(f"GBM subprocess '{mode}' failed with exit code {r.returncode}. "
+                           "Try --gbm-backend sklearn, or --gbm-isolate no if you are not on macOS.")
+
+
 def fit_gbm(Xtr, ytr, Xva, yva, kind, num_classes, args, class_weight=None, seed=0):
-    """Gradient boosted trees with early stopping on the validation set. Returns predict(X)."""
-    cls = kind != "regression"
-    sw = class_weight[np.asarray(ytr, dtype=np.int64)] if (cls and class_weight is not None) else None
-    backend = resolve_gbm_backend(args.gbm_backend)
-    if backend == "lightgbm":
-        import lightgbm as lgb
-        params = dict(n_estimators=args.gbm_trees, learning_rate=args.gbm_lr, num_leaves=args.gbm_leaves,
-                      min_child_samples=args.gbm_min_child, subsample=0.8, subsample_freq=1,
-                      colsample_bytree=0.8, random_state=seed, n_jobs=-1, verbose=-1)
-        model = lgb.LGBMClassifier(**params) if cls else lgb.LGBMRegressor(**params)
-        model.fit(Xtr, ytr, sample_weight=sw, eval_set=[(Xva, yva)],
-                  callbacks=[lgb.early_stopping(args.gbm_patience, verbose=False)])
-    else:
-        from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
-        params = dict(max_iter=args.gbm_trees, learning_rate=args.gbm_lr, max_leaf_nodes=args.gbm_leaves,
-                      random_state=seed, early_stopping=False)
-        model = HistGradientBoostingClassifier(**params) if cls else HistGradientBoostingRegressor(**params)
-        model.fit(Xtr, ytr, sample_weight=sw)
+    """Gradient boosted trees with early stopping on the validation set. Returns predict(X).
+
+    Optionally runs in a separate process (see gbm_worker.py) so PyTorch is never loaded alongside it."""
+    job = dict(Xtr=np.asarray(Xtr, dtype=np.float32), ytr=np.asarray(ytr),
+               Xva=np.asarray(Xva, dtype=np.float32), yva=np.asarray(yva),
+               cls=kind != "regression", num_classes=num_classes, class_weight=class_weight,
+               backend=resolve_gbm_backend(args.gbm_backend), trees=args.gbm_trees, lr=args.gbm_lr,
+               leaves=args.gbm_leaves, min_child=args.gbm_min_child, patience=args.gbm_patience, seed=seed)
+    if not resolve_gbm_isolation(args.gbm_isolate):
+        obj = gbm_worker.fit(job)
+        return lambda X: gbm_worker.predict(obj, X)
+    tmp = Path(tempfile.mkdtemp(prefix="gbm_"))
+    atexit.register(shutil.rmtree, tmp, True)
+    with open(tmp / "job.pkl", "wb") as f:
+        pickle.dump(job, f, protocol=4)
+    _run_gbm_worker("fit", tmp)
 
     def predict(X):
-        if not cls:
-            return model.predict(X)
-        proba = model.predict_proba(X)
-        if proba.shape[1] < num_classes:           # a class absent from the training rows
-            full = np.zeros((len(proba), num_classes))
-            full[:, model.classes_.astype(int)] = proba
-            return full
-        return proba
+        np.save(tmp / "X.npy", np.ascontiguousarray(X, dtype=np.float32))
+        _run_gbm_worker("predict", tmp)
+        return np.load(tmp / "out.npy")
 
     return predict
 
@@ -335,6 +349,8 @@ def add_model_args(p):
     g.add_argument("--seeds", type=int, default=3, help="repeat everything with seeds 0..N-1")
     g.add_argument("--gbm-backend", choices=["auto", "lightgbm", "sklearn"], default="auto",
                    help="auto = LightGBM, except scikit-learn on macOS")
+    g.add_argument("--gbm-isolate", choices=["auto", "yes", "no"], default="auto",
+                   help="run the GBM in its own process (auto = yes on macOS; avoids PyTorch/OpenMP segfaults)")
     g.add_argument("--gbm-trees", type=int, default=500)
     g.add_argument("--gbm-lr", type=float, default=0.05)
     g.add_argument("--gbm-leaves", type=int, default=31)
