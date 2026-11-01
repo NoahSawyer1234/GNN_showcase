@@ -35,9 +35,10 @@ import numpy as np
 import torch
 from sklearn.metrics import (accuracy_score, average_precision_score, f1_score, mean_absolute_error,
                              precision_recall_curve, r2_score, roc_auc_score)
-from torch_geometric.utils import scatter
+from torch_geometric.utils import negative_sampling, scatter, to_undirected
 
 import gbm_worker
+from models import GraphAutoEncoder
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -263,6 +264,42 @@ def neighbor_mean_features(x, edge_index, edge_weight=None) -> torch.Tensor:
     return torch.cat([x, agg / den.clamp(min=1e-9)[:, None]], dim=1)
 
 
+def gae_embeddings(train_graph, args, seed, apply_to=()):
+    """Unsupervised graph-autoencoder embeddings (models.GraphAutoEncoder). No labels are used.
+
+    The GCN encoder (same width, depth, dropout, optimiser and early-stopping rule as the other graph
+    models; --gae-dim outputs) learns to tell the edges of `train_graph` from random non-edges. A share
+    --gae-val-frac of the edges is held out, and early stopping uses their AUROC against as many random
+    non-edges. Returns numpy embeddings for `train_graph` and for every graph in `apply_to`, each computed
+    with all of its own edges, so the encoder also works on a different graph (e.g. a later snapshot)."""
+    set_seed(seed)
+    n, x = train_graph.num_nodes, train_graph.x.to(DEVICE)
+    ei = train_graph.edge_index
+    und = ei[:, ei[0] < ei[1]]
+    perm = torch.randperm(und.size(1))
+    n_val = max(1, int(args.gae_val_frac * und.size(1)))
+    val_pos, tr_pos = und[:, perm[:n_val]].to(DEVICE), und[:, perm[n_val:]].to(DEVICE)
+    tr_ei = to_undirected(tr_pos, num_nodes=n)
+    val_neg = negative_sampling(ei, num_nodes=n, num_neg_samples=n_val).to(DEVICE)
+    y_val = np.r_[np.ones(val_pos.size(1)), np.zeros(val_neg.size(1))]
+    model = GraphAutoEncoder(x.size(1), args.hidden, args.gae_dim, args.layers, args.dropout)
+
+    def train_epoch(opt):
+        opt.zero_grad()
+        loss = model.recon_loss(model.encode(x, tr_ei), tr_pos)     # positives + as many random negatives
+        loss.backward()
+        note_loss(loss)
+        opt.step()
+
+    def val_score():
+        z = model.encode(x, tr_ei)
+        return _safe(roc_auc_score, y_val, torch.cat([model.decode(z, val_pos), model.decode(z, val_neg)]).cpu())
+
+    fit_torch(model, train_epoch, val_score, args)
+    with torch.no_grad():
+        return [model.encode(g.x.to(DEVICE), g.edge_index.to(DEVICE)).cpu().numpy() for g in (train_graph, *apply_to)]
+
+
 # ------------------------------------- reporting -------------------------------------
 class Results:
     """Collects per-seed metrics for each model and prints mean +- std."""
@@ -355,4 +392,13 @@ def add_model_args(p):
                    help="LightGBM min_child_samples; lower it (e.g. 3) for graph-level tasks with few snapshots")
     g.add_argument("--neighbor-baselines", action="store_true",
                    help="also run the GBM on [x, mean of neighbours' x] (graph-aware tabular baseline)")
+    return p
+
+
+def add_gae_args(p):
+    """Flags for the graph-autoencoder row ("GBM + GAE": the GBM on own features + unsupervised GAE embeddings)."""
+    g = p.add_argument_group("graph autoencoder")
+    g.add_argument("--no-gae", action="store_true", help="skip the GBM + GAE row")
+    g.add_argument("--gae-dim", type=int, default=16, help="embedding size")
+    g.add_argument("--gae-val-frac", type=float, default=0.05, help="share of edges held out for early stopping")
     return p

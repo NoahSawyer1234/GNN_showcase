@@ -11,7 +11,7 @@ Part 1, graph facts (no training)
 Part 2, linear probes: logistic regression on X, ÂX, Â²X and [X, ÂX] (Â = GCN-normalised adjacency).
   If ÂX scores far below X, the neighbour averaging is destroying each provider's own signal.
 Part 3, GCN variants with train / val / test AUPRC (same training loop, early stopping on validation):
-  1 / 2 hops, with / without edge weights, skip connection, GraphSAGE, less regularisation;
+  1 / 2 hops, with / without edge weights, skip connection, GraphSAGE, graph attention, less regularisation;
   the GBM on the provider's own features is the reference row.
 A large train-test gap means overfitting; a low TRAIN score means the model cannot fit (underfitting).
 """
@@ -131,6 +131,7 @@ VARIANTS = [  # name, hops, conv, use edge weight, dropout, weight decay (None =
     ("GCN 2L + skip", 2, "gcn_skip", True, None, None),
     ("GCN 2L + skip, no edge weight", 2, "gcn_skip", False, None, None),
     ("GraphSAGE 2L", 2, "sage", False, None, None),
+    ("GAT 2L (attention)", 2, "gat", False, None, None),
 ]
 
 

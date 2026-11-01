@@ -11,7 +11,9 @@ Tasks
 
 What each model sees
   GCN        the pixel's 14 features + its 8-neighbour grid (messages from neighbouring pixels);
-             "GCN + skip" and "GraphSAGE" are reported as separately named rows (--convs)
+             "GCN + skip", "GraphSAGE" and "GAT" (graph attention) are separately named rows (--convs).
+             No graph autoencoder here: every patch has the same 8-neighbour grid, so there is no
+             link structure for it to learn.
   GBM        the pixel's own 14 features only. The GCN therefore has spatial context the GBM lacks;
              --neighbor-baselines gives it [x, mean of the 8 neighbours' x] for a fairer reference
              (that baseline is effectively a one-layer convolution; a CNN is the natural next comparison).
@@ -37,7 +39,7 @@ from compare_utils import (DEVICE, Results, Timer, add_model_args, balanced_clas
 from models import GraphGCN, NodeGCN
 from preprocess_wildfire import WildfireGridDataset
 
-GCN_ROWS = {"gcn": "GCN", "gcn_skip": "GCN + skip", "sage": "GraphSAGE"}
+GCN_ROWS = {"gcn": "GCN", "gcn_skip": "GCN + skip", "sage": "GraphSAGE", "gat": "GAT"}
 
 
 # ------------------------------------ pixel task ------------------------------------
@@ -191,7 +193,8 @@ def main():
     p.add_argument("--max-class-weight", type=float, default=20.0, help="cap on fire/no-fire weight ratio")
     p.add_argument("--pooling", choices=["mean", "sum", "max"], default="mean", help="patch-level GCN readout")
     p.add_argument("--convs", nargs="+", choices=list(GCN_ROWS), default=list(GCN_ROWS),
-                   help="graph models to run, each its own row (plain GCN, GCN + skip connection, GraphSAGE)")
+                   help="graph models to run, each its own row (plain GCN, GCN + skip connection, GraphSAGE, "
+                        "graph attention)")
     add_model_args(p)
     p.set_defaults(epochs=200, patience=15, loss_patience=40, lr=0.005, wd=1e-5, dropout=0.2, gbm_trees=300, seeds=1)
     args = p.parse_args()

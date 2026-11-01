@@ -6,10 +6,11 @@
 Per results file (one figure each): one panel per metric, one column per model.
   dot            one seed (jittered sideways so seeds don't overlap)
   thick bar      mean over seeds, with a thin +/- 1 std whisker
-  colour         model family (graph models, GBM); a diamond marks the "+ nbr-mean" variant
-                 (GBM given hand-engineered neighbour-average features)
+  colour         model family (graph models, GBM); a diamond marks "+ nbr-mean" (GBM given
+                 hand-engineered neighbour-average features), a square "+ GAE" (GBM given unsupervised
+                 graph-autoencoder embeddings)
   grey line      the trivial "predict the prior / mean" reference
-The first panel is the headline metric; every panel says whether higher or lower is better.
+The first panel is the headline metric.
 Every panel has its own y-axis (one measure per axis, never a dual axis).
 
 Also written: figures/overview.png (the headline metric of every task, graph models / GBM only) and
@@ -47,6 +48,9 @@ TASK_NAMES = {"medicare": "Medicare fraud · node classification",
               "underwriting_admin": "Underwriting fraud · administrators (out of time)",
               "wildfire_pixel": "Wildfire · pixel fire", "wildfire_patch": "Wildfire · patch burn fraction"}
 FAMILIES = ("GCN", "GBM")
+FAMILY_LABELS = {"GCN": "graph networks", "GBM": "GBM"}
+MARKERS = {"nbr": "D", "GAE": "s"}            # GBM given graph information: hand-made / learned without labels
+MARKER_LABELS = {"nbr": "+ neighbour-mean features", "GAE": "+ graph-autoencoder embeddings"}
 
 
 # ------------------------------------------ loading ------------------------------------------
@@ -64,8 +68,9 @@ def is_reference(name):
 
 
 def family(name):
-    """Colour group. Graph models (GCN, GCN + skip, GraphSAGE) share the GCN colour."""
-    if name.startswith("GraphSAGE"):
+    """Colour group. Graph models (GCN, GCN + skip, GraphSAGE, GAT) share the GCN colour; every GBM
+    row, including the GBM on graph-autoencoder embeddings, shares the GBM colour."""
+    if name.startswith(("GraphSAGE", "GAT")):
         return "GCN"
     return next((f for f in FAMILIES if name.startswith(f)), None)
 
@@ -91,7 +96,7 @@ def style_axes(ax, t):
 
 
 def label_for(name):
-    return name.replace(" + nbr-mean", "\n+nbr").replace(" + skip", "\n+ skip")
+    return name.replace(" + nbr-mean", "\n+nbr").replace(" + skip", "\n+ skip").replace(" + GAE", "\n+GAE").replace("GraphSAGE", "Graph\nSAGE")
 
 
 def draw_panel(ax, res, metric, models, t, rng, show_reference=True):
@@ -105,7 +110,7 @@ def draw_panel(ax, res, metric, models, t, rng, show_reference=True):
             continue
         all_vals.append(v)
         col = t.get(family(name), t["muted"])
-        marker = "D" if "nbr" in name else "o"
+        marker = MARKERS.get(next((k for k in MARKERS if k in name), None), "o")
         jitter = rng.uniform(-0.16, 0.16, len(v)) if len(v) > 1 else np.zeros(1)
         ax.scatter(x + jitter, v, s=46 if marker == "o" else 40, marker=marker, color=col, alpha=0.8,
                    edgecolors=t["surface"], linewidths=1.2, zorder=3)          # 2px surface ring
@@ -134,19 +139,18 @@ def draw_panel(ax, res, metric, models, t, rng, show_reference=True):
     ax.set_xticks(xs)
     ax.set_xticklabels([label_for(m) for m in models], fontsize=8, color=t["ink2"])
     ax.set_xlim(-0.6, len(models) - 0.4)
-    arrow = "↓ lower is better" if metric in LOWER_BETTER else "↑ higher is better"
-    ax.set_title(f"{NAMES.get(metric, metric)}  ", loc="left", fontsize=10, color=t["ink"], fontweight="bold", pad=22)
-    ax.text(0, 1.025, arrow, transform=ax.transAxes, fontsize=7.5, color=t["muted"], va="bottom")
+    ax.set_title(f"{NAMES.get(metric, metric)}  ", loc="left", fontsize=10, color=t["ink"], fontweight="bold", pad=10)
 
 
 def legend_handles(res, models, t):
     h = [Line2D([0], [0], marker="o", linestyle="", markersize=7, markerfacecolor=t[f], markeredgecolor=t["surface"],
-                label=f) for f in FAMILIES if any(family(m) == f for m in models)]
-    if any("nbr" in m for m in models):
-        h += [Line2D([0], [0], marker="o", linestyle="", markersize=6, markerfacecolor=t["muted"],
-                     markeredgecolor=t["surface"], label="own features"),
-              Line2D([0], [0], marker="D", linestyle="", markersize=5.5, markerfacecolor=t["muted"],
-                     markeredgecolor=t["surface"], label="+ neighbour-mean features")]
+                label=FAMILY_LABELS[f]) for f in FAMILIES if any(family(m) == f for m in models)]
+    extras = [k for k in MARKERS if any(k in m for m in models)]
+    if extras:
+        h.append(Line2D([0], [0], marker="o", linestyle="", markersize=6, markerfacecolor=t["muted"],
+                        markeredgecolor=t["surface"], label="own features"))
+        h += [Line2D([0], [0], marker=MARKERS[k], linestyle="", markersize=5.5, markerfacecolor=t["muted"],
+                     markeredgecolor=t["surface"], label=MARKER_LABELS[k]) for k in extras]
     if any(is_reference(n) for n in res["models"]):
         h.append(Line2D([0], [0], color=t["muted"], linewidth=1.0, label="predict prior / mean (reference)"))
     h.append(Line2D([0], [0], color=t["ink2"], linewidth=2.6, label="mean ± std over seeds (dots = seeds)"))
@@ -158,7 +162,8 @@ def task_figure(res, t, out_path, fmt, dpi):
     metrics = metrics_of(res)
     ncols = min(4, len(metrics))
     nrows = int(np.ceil(len(metrics) / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(3.1 * ncols + 0.6, 3.5 * nrows + 1.5),
+    col_w = max(3.1, 0.55 * len(models))                      # room for every model's label
+    fig, axes = plt.subplots(nrows, ncols, figsize=(col_w * ncols + 0.6, 3.5 * nrows + 1.5),
                              squeeze=False, facecolor=t["surface"])
     rng = np.random.default_rng(0)
     for ax, metric in zip(axes.ravel(), metrics):
@@ -177,7 +182,8 @@ def task_figure(res, t, out_path, fmt, dpi):
 def overview_figure(results, t, out_path, fmt, dpi):
     ncols = 3 if len(results) > 4 else min(len(results), 2)
     nrows = int(np.ceil(len(results) / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(3.9 * ncols + 0.4, 3.3 * nrows + 1.3), squeeze=False,
+    n_models = max(sum(not is_reference(m) and "nbr" not in m for m in r["models"]) for r in results)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(max(3.9, 0.6 * n_models) * ncols + 0.4, 3.3 * nrows + 1.3), squeeze=False,
                              facecolor=t["surface"])
     rng = np.random.default_rng(0)
     for ax, res in zip(axes.ravel(), results):
@@ -186,7 +192,7 @@ def overview_figure(results, t, out_path, fmt, dpi):
         draw_panel(ax, res, metric, models, t, rng)
         task = TASK_NAMES.get(res["stem"], res["stem"])
         ax.set_title(f"{task}  ·  {NAMES.get(metric, metric)}", loc="left", fontsize=9, color=t["ink"],
-                     fontweight="bold", pad=22)
+                     fontweight="bold", pad=10)
     for ax in axes.ravel()[len(results):]:
         ax.set_visible(False)
     fig.suptitle("Graph models vs GBM: headline metric per task (test set)", x=0.01, ha="left", fontsize=11,

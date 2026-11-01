@@ -1,4 +1,4 @@
-"""GCN vs GBM on the Belgian underwriting-fraud network: out-of-time node classification.
+"""Graph neural networks vs GBM on the Belgian underwriting-fraud network: out-of-time node classification.
 
   python preprocess_underwriting.py --raw-dir data/raw/underwriting --out data/processed/underwriting.pt
   python compare_underwriting.py --target company --seeds 5 --neighbor-baselines
@@ -11,12 +11,15 @@ Setup (see preprocess_underwriting.py)
                 are trained on the t0 graph and applied unchanged to the t1 graph (inductive, out of time).
 What each model sees
   graph models  the whole heterogeneous neighbourhood (companies + administrators, node type as a feature).
-                Plain GCN, plus "GCN + skip" and "GraphSAGE" as separately named rows (--convs); all share
-                width, depth, dropout, optimiser, learning rate, weight decay and early stopping.
+                Plain GCN, plus "GCN + skip", "GraphSAGE" and "GAT" (graph attention) as separately named
+                rows (--convs); all share width, depth, dropout, optimiser, learning rate, weight decay and
+                early stopping.
   GBM           the target node's own features only. With --neighbor-baselines also "GBM + nbr-mean":
                 [own features, mean of neighbours' features, log1p #neighbours per edge type], i.e.
                 hand-engineered one-hop graph features, which separates "does the graph help?" from
                 "does *learned* message passing help?".
+  GBM + GAE     own features + unsupervised graph-autoencoder embeddings (skip with --no-gae): a GCN
+                encoder trained without labels to reconstruct the t0 graph's links, then applied to t1.
 Metrics on the test nodes: AUPRC (primary), AUROC, and F1 / accuracy at the validation-F1-optimal threshold.
 The fraud rate shifts between snapshots (companies 49% -> 35%, administrators 19% -> 30%), which moves
 AUPRC and the threshold-based metrics for every model alike.
@@ -30,13 +33,13 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.utils import scatter
 
-from compare_utils import (DEVICE, Results, Timer, add_model_args, balanced_class_weight,
-                           constant_predictor, count_params, fit_gbm, fit_torch, note_loss,
+from compare_utils import (DEVICE, Results, Timer, add_gae_args, add_model_args, balanced_class_weight,
+                           constant_predictor, count_params, fit_gbm, fit_torch, gae_embeddings, note_loss,
                            neighbor_mean_features, score, selection_score, set_seed, to_scores)
 from graph_utils import load_processed
 from models import NodeGCN
 
-GCN_ROWS = {"gcn": "GCN", "gcn_skip": "GCN + skip", "sage": "GraphSAGE"}
+GCN_ROWS = {"gcn": "GCN", "gcn_skip": "GCN + skip", "sage": "GraphSAGE", "gat": "GAT"}
 NAMES = {"company": "companies", "admin": "administrators"}
 
 
@@ -77,12 +80,12 @@ def tables(d, own_idx, nbr):
     return torch.cat([x, agg, torch.log1p(deg)], 1).numpy()
 
 
-def run_gbm(args, name, X0, X1, y0, y1, tr, va, te, w, seed, res):
+def run_gbm(args, name, X0, X1, y0, y1, tr, va, te, w, seed, res, extra_seconds=0.0):
     ev = lambda pred: score("binary", y0[va], to_scores("binary", pred(X0[va])),
                             y1[te], to_scores("binary", pred(X1[te])))
     with Timer() as t:
         pred = fit_gbm(X0[tr], y0[tr], X0[va], y0[va], "binary", 2, args, w, seed)
-    res.add(f"GBM{name}", ev(pred), None, t.seconds)
+    res.add(f"GBM{name}", ev(pred), None, t.seconds + extra_seconds)
 
 
 def main():
@@ -92,8 +95,9 @@ def main():
     p.add_argument("--out", default=None, help="default: results/underwriting_<target>.json")
     p.add_argument("--convs", nargs="+", choices=list(GCN_ROWS), default=list(GCN_ROWS),
                    help="graph models to run, each its own row: plain GCN, GCN + skip connection "
-                        "(own-feature term, see models.SkipGCNConv) and GraphSAGE")
+                        "(own-feature term, see models.SkipGCNConv), GraphSAGE and graph attention (GAT)")
     add_model_args(p)
+    add_gae_args(p)
     args = p.parse_args()
     args.out = args.out or f"results/underwriting_{args.target}.json"
 
@@ -119,7 +123,7 @@ def main():
 
     const = constant_predictor("binary", y0[tr], 2)
     for seed in range(args.seeds):
-        print(f"seed {seed}: training {', '.join(GCN_ROWS[c] for c in args.convs)}, GBM ...", flush=True)
+        print(f"seed {seed}: training {', '.join(GCN_ROWS[c] for c in args.convs)}, GBM, GAE ...", flush=True)
         for conv in args.convs:
             with Timer() as tm:
                 m, n_par = run_gcn(args, d0.clone(), d1.clone(), t, w, seed, conv)
@@ -127,6 +131,11 @@ def main():
         run_gbm(args, "", X0, X1, y0, y1, tr, va, te, w, seed, res)
         if N0 is not None:
             run_gbm(args, " + nbr-mean", N0, N1, y0, y1, tr, va, te, w, seed, res)
+        if not args.no_gae:
+            with Timer() as tm:
+                z0, z1 = gae_embeddings(d0, args, seed, apply_to=(d1,))
+            run_gbm(args, " + GAE", np.hstack([X0, z0]), np.hstack([X1, z1]), y0, y1, tr, va, te, w, seed, res,
+                    tm.seconds)
         res.add("Constant (prior)", score("binary", y0[va], to_scores("binary", const(X0[va])),
                                           y1[te], to_scores("binary", const(X1[te]))), None, 0.0)
         print(f"seed {seed} done")

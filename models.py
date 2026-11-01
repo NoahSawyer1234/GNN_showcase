@@ -8,7 +8,8 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, SAGEConv, global_add_pool, global_max_pool, global_mean_pool
+from torch_geometric.nn import (GAE, GATConv, GCNConv, SAGEConv, global_add_pool, global_max_pool,
+                                global_mean_pool)
 
 
 class SkipGCNConv(nn.Module):
@@ -33,7 +34,23 @@ class _SAGE(SAGEConv):
         return super().forward(x, edge_index)
 
 
-CONVS = {"gcn": GCNConv, "gcn_skip": SkipGCNConv, "sage": _SAGE}
+class _GAT(nn.Module):
+    """Graph attention layer (GATConv): each node weights its neighbours by learned attention scores.
+
+    `heads` attention heads are concatenated so the output width matches the other layers
+    (64 = 4 heads x 16); a layer whose width is not a multiple of `heads` (e.g. the 2-class
+    output) uses one head. Edge weights are accepted and ignored."""
+
+    def __init__(self, in_channels, out_channels, heads=4):
+        super().__init__()
+        h = heads if out_channels % heads == 0 and out_channels >= 4 * heads else 1
+        self.conv = GATConv(in_channels, out_channels // h, heads=h)
+
+    def forward(self, x, edge_index, edge_weight=None):
+        return self.conv(x, edge_index)
+
+
+CONVS = {"gcn": GCNConv, "gcn_skip": SkipGCNConv, "sage": _SAGE, "gat": _GAT}
 
 
 class GCNEncoder(nn.Module):
@@ -48,8 +65,9 @@ class GCNEncoder(nn.Module):
         batch_norm: add BatchNorm after each hidden layer.
         final_activation: apply ReLU (+norm/dropout) after the last layer too.
             Use False when the output feeds a linear head or is a logit.
-        conv: "gcn" (plain GCNConv, the default), "gcn_skip" (GCNConv + own-feature term) or
-            "sage" (GraphSAGE, mean aggregation). The variants are reported as separately named models.
+        conv: "gcn" (plain GCNConv, the default), "gcn_skip" (GCNConv + own-feature term),
+            "sage" (GraphSAGE, mean aggregation) or "gat" (graph attention). The variants are reported
+            as separately named models.
     """
 
     def __init__(self, in_channels: int, hidden_channels: int, out_channels: int,
@@ -159,3 +177,13 @@ class GraphGCN(nn.Module):
     def forward(self, x, edge_index, batch, edge_weight=None):
         h = self.encoder(x, edge_index, edge_weight)
         return self.head(self.pool(h, batch))
+
+
+# --------------------------------------------------------------------------
+# 4. Graph autoencoder (unsupervised): a GCN encoder trained to reconstruct
+#    the graph's edges with an inner-product decoder (Kipf & Welling, 2016).
+#    No labels are used; the embeddings feed a downstream classifier.
+# --------------------------------------------------------------------------
+def GraphAutoEncoder(in_channels, hidden_channels, embed_channels, num_layers=2, dropout=0.5, conv="gcn"):
+    return GAE(GCNEncoder(in_channels, hidden_channels, embed_channels, num_layers, dropout,
+                          final_activation=False, conv=conv))
