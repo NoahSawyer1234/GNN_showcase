@@ -198,6 +198,9 @@ def fit_mlp(Xtr, ytr, Xva, yva, kind, num_classes, args, class_weight=None, seed
 
 def resolve_gbm_backend(name):
     if name == "auto":
+        import platform
+        if platform.system() == "Darwin":      # LightGBM + PyTorch have segfaulted on macOS
+            return "sklearn"                   # (force LightGBM there with --gbm-backend lightgbm)
         try:
             import lightgbm  # noqa: F401
             return "lightgbm"
@@ -268,6 +271,7 @@ class Results:
     def add(self, model, metrics, params=None, seconds=None):
         r = self.rows.setdefault(model, {"params": params, "runs": []})
         r["runs"].append({**metrics, "seconds": seconds})
+        print(f"  [{model}] finished" + (f" in {seconds:.1f}s" if seconds else ""), flush=True)
 
     def summary(self):
         out = {}
@@ -324,7 +328,8 @@ def add_model_args(p):
     g.add_argument("--patience", type=int, default=30)
     g.add_argument("--mlp-batch", type=int, default=2048)
     g.add_argument("--seeds", type=int, default=3, help="repeat everything with seeds 0..N-1")
-    g.add_argument("--gbm-backend", choices=["auto", "lightgbm", "sklearn"], default="auto")
+    g.add_argument("--gbm-backend", choices=["auto", "lightgbm", "sklearn"], default="auto",
+                   help="auto = LightGBM, except scikit-learn on macOS")
     g.add_argument("--gbm-trees", type=int, default=500)
     g.add_argument("--gbm-lr", type=float, default=0.05)
     g.add_argument("--gbm-leaves", type=int, default=31)

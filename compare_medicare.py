@@ -79,6 +79,7 @@ def main():
 
     const = constant_predictor("binary", y[tr], 2)
     for seed in range(args.seeds):
+        print(f"seed {seed}: training GCN, MLP, GBM ...", flush=True)
         with Timer() as t:
             m, n_par = run_gcn(args, data.clone(), w, seed)
         res.add("GCN", m, n_par, t.seconds)
