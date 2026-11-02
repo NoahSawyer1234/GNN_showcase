@@ -1,73 +1,97 @@
 task,model,metric,mean,std,n_seeds
-medicare,GCN,auprc,0.343191,0.003759,5
-medicare,GCN,auroc,0.794479,0.001798,5
-medicare,GCN,f1,0.332727,0.006009,5
-medicare,GCN,accuracy,0.788540,0.010080,5
-medicare,GCN + skip,auprc,0.687636,0.010834,5
-medicare,GCN + skip,auroc,0.940608,0.003521,5
-medicare,GCN + skip,f1,0.617920,0.022445,5
-medicare,GCN + skip,accuracy,0.916636,0.006877,5
-medicare,GraphSAGE,auprc,0.718077,0.006758,5
-medicare,GraphSAGE,auroc,0.948646,0.000871,5
-medicare,GraphSAGE,f1,0.611474,0.016527,5
-medicare,GraphSAGE,accuracy,0.928835,0.001754,5
-medicare,GBM,auprc,0.708544,0.000000,5
-medicare,GBM,auroc,0.935951,0.000000,5
-medicare,GBM,f1,0.637931,0.000000,5
-medicare,GBM,accuracy,0.922366,0.000000,5
-medicare,GBM + nbr-mean,auprc,0.699712,0.000000,5
-medicare,GBM + nbr-mean,auroc,0.944500,0.000000,5
-medicare,GBM + nbr-mean,f1,0.646809,0.000000,5
-medicare,GBM + nbr-mean,accuracy,0.923290,0.000000,5
-medicare,Constant (prior),auprc,0.093346,0.000000,5
-medicare,Constant (prior),auroc,0.500000,0.000000,5
-medicare,Constant (prior),f1,0.170752,0.000000,5
-medicare,Constant (prior),accuracy,0.093346,0.000000,5
-underwriting_admin,GCN,auprc,0.455775,0.002625,5
-underwriting_admin,GCN,auroc,0.683921,0.001443,5
-underwriting_admin,GCN,f1,0.527462,0.004366,5
-underwriting_admin,GCN,accuracy,0.608889,0.004176,5
-underwriting_admin,GCN + skip,auprc,0.457640,0.003411,5
-underwriting_admin,GCN + skip,auroc,0.692701,0.002753,5
-underwriting_admin,GCN + skip,f1,0.516525,0.020930,5
-underwriting_admin,GCN + skip,accuracy,0.630000,0.019927,5
-underwriting_admin,GraphSAGE,auprc,0.440050,0.003367,5
-underwriting_admin,GraphSAGE,auroc,0.689680,0.003413,5
-underwriting_admin,GraphSAGE,f1,0.533934,0.007448,5
-underwriting_admin,GraphSAGE,accuracy,0.627222,0.004779,5
-underwriting_admin,GBM,auprc,0.397037,0.000000,5
-underwriting_admin,GBM,auroc,0.660597,0.000000,5
-underwriting_admin,GBM,f1,0.500840,0.000000,5
-underwriting_admin,GBM,accuracy,0.587500,0.000000,5
-underwriting_admin,GBM + nbr-mean,auprc,0.440204,0.000000,5
-underwriting_admin,GBM + nbr-mean,auroc,0.683018,0.000000,5
-underwriting_admin,GBM + nbr-mean,f1,0.504167,0.000000,5
-underwriting_admin,GBM + nbr-mean,accuracy,0.669444,0.000000,5
-underwriting_admin,Constant (prior),auprc,0.304167,0.000000,5
-underwriting_admin,Constant (prior),auroc,0.500000,0.000000,5
-underwriting_admin,Constant (prior),f1,0.466454,0.000000,5
-underwriting_admin,Constant (prior),accuracy,0.304167,0.000000,5
-underwriting_company,GCN,auprc,0.602009,0.000824,5
-underwriting_company,GCN,auroc,0.768318,0.000573,5
-underwriting_company,GCN,f1,0.642912,0.001440,5
-underwriting_company,GCN,accuracy,0.677084,0.010142,5
-underwriting_company,GCN + skip,auprc,0.604466,0.000975,5
-underwriting_company,GCN + skip,auroc,0.770605,0.000936,5
-underwriting_company,GCN + skip,f1,0.641921,0.003510,5
-underwriting_company,GCN + skip,accuracy,0.681206,0.009977,5
-underwriting_company,GraphSAGE,auprc,0.608036,0.000342,5
-underwriting_company,GraphSAGE,auroc,0.770896,0.000972,5
-underwriting_company,GraphSAGE,f1,0.642995,0.002183,5
-underwriting_company,GraphSAGE,accuracy,0.675265,0.013774,5
-underwriting_company,GBM,auprc,0.583840,0.000000,5
-underwriting_company,GBM,auroc,0.757477,0.000000,5
-underwriting_company,GBM,f1,0.637314,0.000000,5
-underwriting_company,GBM,accuracy,0.652925,0.000000,5
-underwriting_company,GBM + nbr-mean,auprc,0.593771,0.000000,5
-underwriting_company,GBM + nbr-mean,auroc,0.760583,0.000000,5
-underwriting_company,GBM + nbr-mean,f1,0.638212,0.000000,5
-underwriting_company,GBM + nbr-mean,accuracy,0.673689,0.000000,5
-underwriting_company,Constant (prior),auprc,0.353895,0.000000,5
-underwriting_company,Constant (prior),auroc,0.500000,0.000000,5
-underwriting_company,Constant (prior),f1,0.522781,0.000000,5
-underwriting_company,Constant (prior),accuracy,0.353895,0.000000,5
+medicare,GCN,auprc,0.345608,0.004224,20
+medicare,GCN,auroc,0.794239,0.005366,20
+medicare,GCN,f1,0.338013,0.008526,20
+medicare,GCN,accuracy,0.800416,0.029102,20
+medicare,GCN + skip,auprc,0.685969,0.011141,20
+medicare,GCN + skip,auroc,0.939660,0.002478,20
+medicare,GCN + skip,f1,0.611051,0.018193,20
+medicare,GCN + skip,accuracy,0.917468,0.007348,20
+medicare,GraphSAGE,auprc,0.716229,0.006944,20
+medicare,GraphSAGE,auroc,0.947155,0.002871,20
+medicare,GraphSAGE,f1,0.620448,0.018818,20
+medicare,GraphSAGE,accuracy,0.925832,0.005010,20
+medicare,GAT,auprc,0.363169,0.059626,20
+medicare,GAT,auroc,0.869182,0.023869,20
+medicare,GAT,f1,0.457743,0.049914,20
+medicare,GAT,accuracy,0.861322,0.017282,20
+medicare,GBM,auprc,0.708544,0.000000,20
+medicare,GBM,auroc,0.935951,0.000000,20
+medicare,GBM,f1,0.637931,0.000000,20
+medicare,GBM,accuracy,0.922366,0.000000,20
+medicare,GBM + nbr-mean,auprc,0.699712,0.000000,20
+medicare,GBM + nbr-mean,auroc,0.944500,0.000000,20
+medicare,GBM + nbr-mean,f1,0.646809,0.000000,20
+medicare,GBM + nbr-mean,accuracy,0.923290,0.000000,20
+medicare,GBM + GAE,auprc,0.695652,0.009572,20
+medicare,GBM + GAE,auroc,0.938945,0.004248,20
+medicare,GBM + GAE,f1,0.634873,0.020939,20
+medicare,GBM + GAE,accuracy,0.923475,0.005209,20
+medicare,Constant (prior),auprc,0.093346,0.000000,20
+medicare,Constant (prior),auroc,0.500000,0.000000,20
+medicare,Constant (prior),f1,0.170752,0.000000,20
+medicare,Constant (prior),accuracy,0.093346,0.000000,20
+underwriting_admin,GCN,auprc,0.456253,0.003708,20
+underwriting_admin,GCN,auroc,0.683157,0.001581,20
+underwriting_admin,GCN,f1,0.526590,0.006937,20
+underwriting_admin,GCN,accuracy,0.609097,0.007250,20
+underwriting_admin,GCN + skip,auprc,0.452711,0.006213,20
+underwriting_admin,GCN + skip,auroc,0.689983,0.003204,20
+underwriting_admin,GCN + skip,f1,0.521352,0.015424,20
+underwriting_admin,GCN + skip,accuracy,0.622847,0.012581,20
+underwriting_admin,GraphSAGE,auprc,0.439873,0.004800,20
+underwriting_admin,GraphSAGE,auroc,0.689005,0.003772,20
+underwriting_admin,GraphSAGE,f1,0.535403,0.009028,20
+underwriting_admin,GraphSAGE,accuracy,0.628750,0.007747,20
+underwriting_admin,GAT,auprc,0.441771,0.006234,20
+underwriting_admin,GAT,auroc,0.685328,0.003867,20
+underwriting_admin,GAT,f1,0.519215,0.041395,20
+underwriting_admin,GAT,accuracy,0.620208,0.016259,20
+underwriting_admin,GBM,auprc,0.397037,0.000000,20
+underwriting_admin,GBM,auroc,0.660597,0.000000,20
+underwriting_admin,GBM,f1,0.500840,0.000000,20
+underwriting_admin,GBM,accuracy,0.587500,0.000000,20
+underwriting_admin,GBM + nbr-mean,auprc,0.440204,0.000000,20
+underwriting_admin,GBM + nbr-mean,auroc,0.683018,0.000000,20
+underwriting_admin,GBM + nbr-mean,f1,0.504167,0.000000,20
+underwriting_admin,GBM + nbr-mean,accuracy,0.669444,0.000000,20
+underwriting_admin,GBM + GAE,auprc,0.416774,0.008143,20
+underwriting_admin,GBM + GAE,auroc,0.662594,0.006945,20
+underwriting_admin,GBM + GAE,f1,0.503112,0.017073,20
+underwriting_admin,GBM + GAE,accuracy,0.600764,0.029745,20
+underwriting_admin,Constant (prior),auprc,0.304167,0.000000,20
+underwriting_admin,Constant (prior),auroc,0.500000,0.000000,20
+underwriting_admin,Constant (prior),f1,0.466454,0.000000,20
+underwriting_admin,Constant (prior),accuracy,0.304167,0.000000,20
+underwriting_company,GCN,auprc,0.602280,0.000944,20
+underwriting_company,GCN,auroc,0.768137,0.000639,20
+underwriting_company,GCN,f1,0.641707,0.002650,20
+underwriting_company,GCN,accuracy,0.682025,0.008772,20
+underwriting_company,GCN + skip,auprc,0.605017,0.001996,20
+underwriting_company,GCN + skip,auroc,0.770418,0.001156,20
+underwriting_company,GCN + skip,f1,0.640509,0.004545,20
+underwriting_company,GCN + skip,accuracy,0.682654,0.010940,20
+underwriting_company,GraphSAGE,auprc,0.608547,0.001689,20
+underwriting_company,GraphSAGE,auroc,0.770847,0.000972,20
+underwriting_company,GraphSAGE,f1,0.643872,0.002396,20
+underwriting_company,GraphSAGE,accuracy,0.682904,0.012487,20
+underwriting_company,GAT,auprc,0.603596,0.001842,20
+underwriting_company,GAT,auroc,0.768630,0.001513,20
+underwriting_company,GAT,f1,0.643689,0.002403,20
+underwriting_company,GAT,accuracy,0.679645,0.009901,20
+underwriting_company,GBM,auprc,0.583840,0.000000,20
+underwriting_company,GBM,auroc,0.757477,0.000000,20
+underwriting_company,GBM,f1,0.637314,0.000000,20
+underwriting_company,GBM,accuracy,0.652925,0.000000,20
+underwriting_company,GBM + nbr-mean,auprc,0.593771,0.000000,20
+underwriting_company,GBM + nbr-mean,auroc,0.760583,0.000000,20
+underwriting_company,GBM + nbr-mean,f1,0.638212,0.000000,20
+underwriting_company,GBM + nbr-mean,accuracy,0.673689,0.000000,20
+underwriting_company,GBM + GAE,auprc,0.578908,0.004109,20
+underwriting_company,GBM + GAE,auroc,0.752143,0.002403,20
+underwriting_company,GBM + GAE,f1,0.628017,0.004066,20
+underwriting_company,GBM + GAE,accuracy,0.658055,0.010292,20
+underwriting_company,Constant (prior),auprc,0.353895,0.000000,20
+underwriting_company,Constant (prior),auroc,0.500000,0.000000,20
+underwriting_company,Constant (prior),f1,0.522781,0.000000,20
+underwriting_company,Constant (prior),accuracy,0.353895,0.000000,20
